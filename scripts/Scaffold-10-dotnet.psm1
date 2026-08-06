@@ -76,6 +76,12 @@ function Invoke-DotnetScaffold {
     #>
     param([Parameter(Mandatory)][hashtable]$Context)
 
+    # Additive: .github already registered 'actions', and any deeper layer can add its own.
+    # Declared rather than left to GitHub's auto-detection, which only sees what exists at the
+    # moment default setup is switched on - a template enabled while still empty would otherwise
+    # never start analysing the C# added later.
+    Add-ScaffoldCodeqlLanguage csharp
+
     $default = ConvertTo-DotnetProjectName -RepoName $Context.RepoName
 
     # -Bound @{} means "nothing was supplied on the command line", so this prompts with the
