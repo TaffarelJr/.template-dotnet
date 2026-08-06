@@ -26,37 +26,25 @@ Set-StrictMode -Version Latest
 # renaming it needs Rename-ScaffoldToken rather than a find/replace.
 $script:DotnetPlaceholder = 'Placeholder'
 
-# Paths the .NET payload occupies. Used as the commit pathspec so the rename commit can never
-# pick up unrelated uncommitted work. EXTEND THIS as the template grows: anything not listed
-# here will be renamed on disk but left out of the commit.
-$script:DotnetPaths = @(
-    'src'
-    'test'
-    '*.sln'
-    '*.slnx'
-    'Directory.Build.props'
-    'Directory.Packages.props'
-    'Common.props'
-    'GitVersion.yml'
-    'global.json'
-    'nuget.config'
-    'StyleCop.json'
-    '.editorconfig'
-)
 
 function ConvertTo-DotnetProjectName {
     <#
         Turn a kebab-case repo name into the PascalCase name .NET wants:
-            my-service      -> MyService
-            onion-seed.data -> OnionSeedData
+            my-service              -> MyService
+            onion-seed.data         -> OnionSeed.Data
+            onion-seed.helpers-async -> OnionSeed.HelpersAsync
+
+        Dots are NAMESPACE SEPARATORS and survive; only '-' and '_' are word breaks. So each
+        dot-delimited segment is PascalCased independently and the dots are put back.
 
         Only used as the DEFAULT for the prompt - the answer is always the developer's.
     #>
     param([Parameter(Mandatory)][string]$RepoName)
-    $parts = @($RepoName -split '[-_.]+' | Where-Object { $_ })
-    return -join ($parts | ForEach-Object {
-            $_.Substring(0, 1).ToUpperInvariant() + $_.Substring(1)
-        })
+    $segments = @($RepoName -split '\.' | Where-Object { $_ })
+    return (@($segments | ForEach-Object {
+                $words = @($_ -split '[-_]+' | Where-Object { $_ })
+                -join ($words | ForEach-Object { $_.Substring(0, 1).ToUpperInvariant() + $_.Substring(1) })
+            }) -join '.')
 }
 
 function Get-DotnetPlaceholder {
@@ -100,7 +88,7 @@ function Invoke-DotnetScaffold {
     }
 
     Invoke-ScaffoldGatedCommit -RepoPath $Context.RepoPath -TemplateBranch $Context.TemplateBranch `
-        -Message 'chore: rename the placeholder project' -Paths $script:DotnetPaths -Body {
+        -Message 'chore: rename the placeholder project' -Body {
         Rename-DotnetProject -RepoPath $Context.RepoPath -To $projectName
     }
 }
