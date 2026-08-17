@@ -93,7 +93,7 @@ function Invoke-DotnetScaffold {
         throw "'$projectName' is not a valid .NET namespace: use PascalCase, optionally dotted."
     }
 
-    Invoke-ScaffoldGatedCommit -RepoPath $Context.RepoPath -TemplateBranch $Context.TemplateBranch `
+    Invoke-ScaffoldGatedCommit -RepoPath $Context.RepoPath `
         -Message 'chore: rename the placeholder project' -Body {
         Rename-DotnetProject -RepoPath $Context.RepoPath -To $projectName
     }
