@@ -15,7 +15,7 @@
     merge conflicts on them.
 
     Anything Helpers.psm1 EXPORTS is available here - Write-Ok, Write-Detail, Write-Skip,
-    Rename-ScaffoldToken, Invoke-ScaffoldGatedCommit, Resolve-ScaffoldValue, Invoke-ScaffoldGit -
+    Rename-ScaffoldToken, Invoke-ScaffoldGatedCommit, Resolve-ScaffoldInput, Invoke-ScaffoldGit -
     but its private internals are not.
 #>
 
@@ -86,7 +86,7 @@ function Invoke-DotnetScaffold {
 
     # -Bound @{} means "nothing was supplied on the command line", so this prompts with the
     # derived default - and returns the default untouched during an unattended run.
-    $projectName = Resolve-ScaffoldValue -Name DotnetProjectName -Bound @{} -Value '' `
+    $projectName = Resolve-ScaffoldInput -Name DotnetProjectName -Bound @{} -Value '' `
         -Prompt 'Project / root-namespace name (PascalCase)' -Default $default
 
     if ($projectName -notmatch '^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$') {

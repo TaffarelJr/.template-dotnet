@@ -54,7 +54,7 @@ Parameters:
 An explicit empty value (e.g. `-Homepage ''`) counts as "supplied"
 and skips that prompt.
 
-The GitHub **owner is a constant** (`$script:ScaffoldOwner` in `Helpers.psm1`) —
+The GitHub **owner is a constant** (`$script:RepoOwner` in `Helpers.psm1`) —
 this scaffolding is personal-only, so there's no owner parameter to pass. The scripts warn
 if the repo's `origin` owner doesn't match it.
 

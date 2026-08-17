@@ -36,9 +36,9 @@ Set-StrictMode -Version Latest
 # creates lives under one account. Hard-coding the owner removes a parameter, a prompt,
 # and all cross-owner handling - notably the `_extends` owner trap, where the Settings
 # app resolves every hop against the LEAF repo's owner rather than the parent's.
-$script:ScaffoldOwner = 'TaffarelJr'
+$script:RepoOwner = 'TaffarelJr'
 
-function Get-ScaffoldOwner { return $script:ScaffoldOwner }
+function Get-RepoOwner { return $script:RepoOwner }
 
 #───────────────────────────────────────────────────────────────────────────────
 # Per-layer customization steps
@@ -138,23 +138,23 @@ $script:ManualItems = [System.Collections.Generic.List[object]]::new()
 #                                   Template Sync dispatch and the "already fully
 #                                   scaffolded" message, so it must NOT count mere
 #                                   successful verifications (admin check, push no-op...).
-$script:Succeeded = 0
-$script:Skipped = 0
-$script:Warnings = 0
-$script:Activity = 0
+$script:OkCount = 0
+$script:SkipCount = 0
+$script:WarnCount = 0
+$script:ChangeCount = 0
 
 $script:Rule = '─' * 72
 
 # One marker per outcome, used by EVERY operation so the log reads consistently:
 #   ✅ succeeded   ⏭️ already done   ⚠️ warning   ❌ failed   ℹ️ neutral note
-function Write-Ok { param([string]$Msg) $script:Succeeded++; Write-Host "  ✅ $Msg" -ForegroundColor Green }
-function Write-Skip { param([string]$Msg) $script:Skipped++; Write-Host "  ⏭️  $Msg" -ForegroundColor DarkGray }
-function Write-Warn { param([string]$Msg) $script:Warnings++; Write-Host "  ⚠️  $Msg" -ForegroundColor Yellow }
+function Write-Ok { param([string]$Msg) $script:OkCount++; Write-Host "  ✅ $Msg" -ForegroundColor Green }
+function Write-Skip { param([string]$Msg) $script:SkipCount++; Write-Host "  ⏭️  $Msg" -ForegroundColor DarkGray }
+function Write-Warn { param([string]$Msg) $script:WarnCount++; Write-Host "  ⚠️  $Msg" -ForegroundColor Yellow }
 function Write-Err { param([string]$Msg) Write-Host "  ❌ $Msg" -ForegroundColor Red }
 function Write-Info { param([string]$Msg) Write-Host "  ℹ️  $Msg" -ForegroundColor Gray }
 
 # Flags that this run changed real state (see $Activity above).
-function Add-ScaffoldActivity { $script:Activity++ }
+function Add-ScaffoldChange { $script:ChangeCount++ }
 
 # Indented continuation line, for detail belonging to the marker above it.
 function Write-Detail { param([string]$Msg) Write-Host "       $Msg" -ForegroundColor DarkGray }
@@ -205,13 +205,13 @@ function Write-ScaffoldStep {
     Write-Host ($head + ('═' * [Math]::Max(0, 72 - $head.Length))) -ForegroundColor Cyan
 }
 
-function Get-ScaffoldActivity { return $script:Activity }
+function Get-ScaffoldChangeCount { return $script:ChangeCount }
 
 function Show-ScaffoldSummary {
     <# One-line tally so the end of a run is readable at a glance. #>
     Write-Host ""
     Write-Host ("  {0} ok · {1} already done · {2} warning(s)" -f `
-            $script:Succeeded, $script:Skipped, $script:Warnings) -ForegroundColor Gray
+            $script:OkCount, $script:SkipCount, $script:WarnCount) -ForegroundColor Gray
 }
 
 function Show-ScaffoldFailure {
@@ -298,7 +298,7 @@ function Set-ScaffoldSkipPrompts {
 # Input resolution (command line OR prompt)
 #───────────────────────────────────────────────────────────────────────────────
 
-function Resolve-ScaffoldValue {
+function Resolve-ScaffoldInput {
     <#
         Return a value that may come from the command line or an interactive prompt.
         - If the caller passed the parameter (tracked in $Bound = $PSBoundParameters),
@@ -413,9 +413,9 @@ function Get-ScaffoldContext {
     if ($originUrl -notmatch '[:/](?<owner>[^/]+)/(?<repo>[^/]+?)(\.git)?$') {
         throw "Could not parse owner/repo from origin URL '$originUrl'."
     }
-    if ($Matches['owner'] -ne $script:ScaffoldOwner) {
+    if ($Matches['owner'] -ne $script:RepoOwner) {
         Write-Warn ("This repo's origin owner is '$($Matches['owner'])' but the configured owner is " +
-            "'$($script:ScaffoldOwner)'. Update `$script:ScaffoldOwner in Helpers.psm1 if that's wrong.")
+            "'$($script:RepoOwner)'. Update `$script:RepoOwner in Helpers.psm1 if that's wrong.")
     }
     [pscustomobject]@{
         SourceOwner     = $Matches['owner']
@@ -512,7 +512,7 @@ function New-ScaffoldRepo {
     gh repo view $OwnerRepo --json name 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { Write-Skip "Repo $OwnerRepo already exists"; return }
     Invoke-ScaffoldGh -What "Creating $OwnerRepo" -Arguments @('repo', 'create', $OwnerRepo, '--public') | Out-Null
-    Add-ScaffoldActivity
+    Add-ScaffoldChange
     Write-Ok "Created empty public repo $OwnerRepo"
 }
 
@@ -537,7 +537,7 @@ function Set-ScaffoldActionsPermissions {
     Invoke-ScaffoldGh -What 'Allowing Actions to create and approve PRs' -Arguments @(
         'api', '--method', 'PUT', "repos/$OwnerRepo/actions/permissions/workflow",
         '-f', "default_workflow_permissions=$perm", '-F', 'can_approve_pull_request_reviews=true') | Out-Null
-    Add-ScaffoldActivity
+    Add-ScaffoldChange
     Write-Ok "Actions: allowed to create and approve pull requests"
 }
 
@@ -549,7 +549,7 @@ function Enable-ScaffoldPrivateVulnReporting {
     }
     Invoke-ScaffoldGh -What 'Enabling private vulnerability reporting' -Arguments @(
         'api', '--method', 'PUT', "repos/$OwnerRepo/private-vulnerability-reporting", '--silent') | Out-Null
-    Add-ScaffoldActivity
+    Add-ScaffoldChange
     Write-Ok "Enabled private vulnerability reporting"
 }
 
@@ -566,7 +566,7 @@ function Set-ScaffoldCodecovSecret {
     }
     Invoke-ScaffoldGh -What 'Setting the CODECOV_TOKEN secret' -Arguments @(
         'secret', 'set', 'CODECOV_TOKEN', '--repo', $OwnerRepo, '--body', $Token) | Out-Null
-    Add-ScaffoldActivity
+    Add-ScaffoldChange
     Write-Ok "Added repo secret CODECOV_TOKEN"
 }
 
@@ -603,7 +603,7 @@ function Set-ScaffoldTopics {
     $ghArgs = @('api', '--method', 'PUT', "repos/$OwnerRepo/topics")
     foreach ($n in $names) { $ghArgs += @('-f', "names[]=$n") }
     Invoke-ScaffoldGh -What 'Setting repo topics' -Arguments $ghArgs | Out-Null
-    Add-ScaffoldActivity
+    Add-ScaffoldChange
     Write-Ok "Set topics: $($names -join ', ')"
 }
 
@@ -632,7 +632,7 @@ function Enable-ScaffoldImmutableReleases {
     gh api --method PUT "repos/$OwnerRepo/immutable-releases" --silent 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         $global:LASTEXITCODE = 0
-        Add-ScaffoldActivity
+        Add-ScaffoldChange
         Write-Ok 'Enabled immutable releases'
         return
     }
@@ -654,7 +654,7 @@ function Enable-ScaffoldCodeql {
     $enabled = ($LASTEXITCODE -eq 0)
     $global:LASTEXITCODE = 0   # this failure is tolerated; don't leak it to a later Assert-LastExit
     if ($enabled) {
-        Add-ScaffoldActivity
+        Add-ScaffoldChange
         Write-Ok 'CodeQL default setup enabled'
     }
     else {
@@ -667,7 +667,7 @@ function Enable-ScaffoldCodeql {
 # Step: clone & wire up remotes (resume-safe)
 #───────────────────────────────────────────────────────────────────────────────
 
-function Get-ScaffoldSiblingUrl {
+function Get-ScaffoldNewRepoUrl {
     <#
         Build the git URL for a sibling repo by swapping the owner/repo path in the
         source URL - preserving host/protocol (incl. custom SSH aliases like
@@ -778,7 +778,7 @@ function Initialize-ScaffoldClone {
     else {
         # git clone (not `gh repo clone`) keeps the source URL's host alias/creds.
         Invoke-ScaffoldGit -What "Cloning $OriginUrl" -Arguments @('clone', $OriginUrl, $TargetPath) | Out-Null
-        Add-ScaffoldActivity
+        Add-ScaffoldChange
         Write-Ok "Cloned $OriginUrl"
         Write-Detail "-> $TargetPath"
     }
@@ -1171,7 +1171,7 @@ function Write-ScaffoldWorkspaceFile {
     ) | ForEach-Object { $lines.Add($_) }
 
     ($lines -join "`r`n") + "`r`n" | Set-Content -NoNewline -Encoding utf8 $wsPath
-    Add-ScaffoldActivity
+    Add-ScaffoldChange
     Write-Ok "Wrote $RepoName.code-workspace ($(1 + $ChainPaths.Count) folders)"
     return $wsPath
 }
@@ -1339,7 +1339,7 @@ function Invoke-ScaffoldCommit {
         # Summarise what is going in BEFORE committing, so the log shows the grouping.
         $staged = @(git -C $RepoPath diff --cached --name-status 2>$null)
         Invoke-ScaffoldGit -What "Committing '$Message'" -RepoPath $RepoPath -Arguments @('commit', '-m', $Message) | Out-Null
-        Add-ScaffoldActivity
+        Add-ScaffoldChange
         Write-Ok "Committed: $Message"
         foreach ($line in $staged) {
             $parts = $line -split "`t", 2
@@ -1369,7 +1369,7 @@ function Start-ScaffoldTemplateSync {
     param([Parameter(Mandatory)][string]$OwnerRepo)
     & gh workflow run template-sync.yml --repo $OwnerRepo --ref main 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
-        Add-ScaffoldActivity
+        Add-ScaffoldChange
         Write-Ok 'Dispatched Template Sync'
         Write-Detail "verify: gh run list --repo $OwnerRepo --workflow template-sync.yml"
         Write-Detail "expect no errors and NO pull request"
@@ -1391,7 +1391,7 @@ Export-ModuleMember -Function @(
 
     'Invoke-ScaffoldGit'
     'Invoke-ScaffoldGh'
-    'Get-ScaffoldOwner'
+    'Get-RepoOwner'
     'Write-ScaffoldStep'
     'Write-ScaffoldField'
     'Show-ScaffoldSummary'
@@ -1403,9 +1403,9 @@ Export-ModuleMember -Function @(
     'Get-ScaffoldLayerModule'
     'Import-ScaffoldLayerModule'
     'Remove-ScaffoldLayerModule'
-    'Resolve-ScaffoldValue'
+    'Resolve-ScaffoldInput'
     'Set-ScaffoldSkipPrompts'
-    'Get-ScaffoldActivity'
+    'Get-ScaffoldChangeCount'
     'Add-ScaffoldManualItem'
     'Register-ScaffoldManualSettings'
     'Show-ScaffoldManualChecklist'
@@ -1419,7 +1419,7 @@ Export-ModuleMember -Function @(
     'Set-ScaffoldTopics'
     'Enable-ScaffoldImmutableReleases'
     'Enable-ScaffoldCodeql'
-    'Get-ScaffoldSiblingUrl'
+    'Get-ScaffoldNewRepoUrl'
     'Get-ScaffoldTemplateChain'
     'Initialize-ScaffoldClone'
     'Test-ScaffoldCommitExists'

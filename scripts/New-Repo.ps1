@@ -90,9 +90,9 @@ trap { Remove-ScaffoldLayerModule; Reset-ScaffoldGhAccount; Show-ScaffoldFailure
 # ── Step 0: context + inputs ──────────────────────────────────────────────────
 Write-ScaffoldStep '0' 'Prerequisites & inputs'
 $ctx = Get-ScaffoldContext -ScriptRoot $PSScriptRoot
-$owner = Get-ScaffoldOwner
+$owner = Get-RepoOwner
 
-$Kind = Resolve-ScaffoldValue -Name Kind -Bound $bound -Value $Kind `
+$Kind = Resolve-ScaffoldInput -Name Kind -Bound $bound -Value $Kind `
     -Prompt 'Kind - Template (a new layer) or Code (a leaf repo)' -Default 'Code'
 if ($Kind -notin 'Template', 'Code') { throw "Kind must be 'Template' or 'Code', not '$Kind'." }
 
@@ -102,7 +102,7 @@ $namePrompt = if ($Kind -eq 'Template') {
 else {
     "New repo name (kebab-case, e.g. 'my-service')"
 }
-$Name = Resolve-ScaffoldValue -Name Name -Bound $bound -Value $Name -Prompt $namePrompt
+$Name = Resolve-ScaffoldInput -Name Name -Bound $bound -Value $Name -Prompt $namePrompt
 
 # Accept either 'dotnet' or '.template-dotnet' for a template layer.
 $slug = if ($Kind -eq 'Template') { $Name -replace '^\.template-', '' } else { $Name }
@@ -117,17 +117,17 @@ Write-ScaffoldField ''                $ctx.SourceRoot
 Write-ScaffoldField "New $($Kind.ToLowerInvariant()) repo" $ownerRepo
 Write-ScaffoldField 'Clone to'        $targetPath
 
-$GhAccount = Resolve-ScaffoldValue -Name GhAccount -Bound $bound -Value $GhAccount -Prompt "gh account that admins '$owner'" -Default $owner
+$GhAccount = Resolve-ScaffoldInput -Name GhAccount -Bound $bound -Value $GhAccount -Prompt "gh account that admins '$owner'" -Default $owner
 Use-ScaffoldGhAccount -GhAccount $GhAccount -ProbeOwnerRepo $ctx.SourceOwnerRepo
 
-$Description = Resolve-ScaffoldValue -Name Description -Bound $bound -Value $Description -Prompt 'Repo description (single line)'
-$Homepage = Resolve-ScaffoldValue -Name Homepage    -Bound $bound -Value $Homepage    -Prompt 'Homepage URL (optional - blank to omit)'
-$Topics = Resolve-ScaffoldValue -Name Topics      -Bound $bound -Value $Topics      -Prompt 'Topics (comma-separated)'
+$Description = Resolve-ScaffoldInput -Name Description -Bound $bound -Value $Description -Prompt 'Repo description (single line)'
+$Homepage = Resolve-ScaffoldInput -Name Homepage    -Bound $bound -Value $Homepage    -Prompt 'Homepage URL (optional - blank to omit)'
+$Topics = Resolve-ScaffoldInput -Name Topics      -Bound $bound -Value $Topics      -Prompt 'Topics (comma-separated)'
 
 if (-not $bound.ContainsKey('CodecovToken')) {
     Write-ScaffoldField 'Codecov token at' "https://app.codecov.io/account/gh/$owner/org-upload-token"
 }
-$CodecovToken = Resolve-ScaffoldValue -Name CodecovToken -Bound $bound -Value $CodecovToken -Prompt 'CODECOV_TOKEN value (blank to skip)' -Secret
+$CodecovToken = Resolve-ScaffoldInput -Name CodecovToken -Bound $bound -Value $CodecovToken -Prompt 'CODECOV_TOKEN value (blank to skip)' -Secret
 
 if (-not (Confirm-ScaffoldProceed -OwnerRepo $ownerRepo)) { return }
 
@@ -145,7 +145,7 @@ Set-ScaffoldCodecovSecret           -OwnerRepo $ownerRepo -Token $CodecovToken
 
 # ── Step 3: clone + remotes ───────────────────────────────────────────────────
 Write-ScaffoldStep '3' 'Clone the new repo'
-$originUrl = Get-ScaffoldSiblingUrl -Context $ctx -RepoName $repo   # preserves origin style
+$originUrl = Get-ScaffoldNewRepoUrl -Context $ctx -RepoName $repo   # preserves origin style
 Initialize-ScaffoldClone -OriginUrl $originUrl -TargetPath $targetPath -TemplateUrl $ctx.SourceUrl -TemplateBranch $TemplateBranch
 
 # ── Step 4: drop what belongs only to the parent ──────────────────────────────
@@ -202,7 +202,7 @@ Enable-ScaffoldCodeql -OwnerRepo $ownerRepo   # now that code/workflows exist
 
 # ── Step 10: initialize workflows (only if something changed this run) ─────────
 Write-ScaffoldStep '10' 'Initialize Template Sync'
-if ((Get-ScaffoldActivity) -gt 0) {
+if ((Get-ScaffoldChangeCount) -gt 0) {
     Start-ScaffoldTemplateSync -OwnerRepo $ownerRepo
 }
 else {
@@ -226,7 +226,7 @@ Register-ScaffoldManualSettings -OwnerRepo $ownerRepo
 Show-ScaffoldManualChecklist    -OwnerRepo $ownerRepo
 Show-ScaffoldSummary
 
-if ((Get-ScaffoldActivity) -eq 0) {
+if ((Get-ScaffoldChangeCount) -eq 0) {
     Write-Host "  ✅ $ownerRepo was already fully scaffolded - nothing to change." -ForegroundColor Green
 }
 else {
