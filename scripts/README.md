@@ -5,9 +5,9 @@ Each one creates a new repo on GitHub, and clones it next to this one locally.
 
 | File                  | Purpose                                                  |
 | --------------------- | -------------------------------------------------------- |
-| 📄 `Scaffold.psm1`  | Shared helper module — one function per step             |
+| 📄 `Helpers.psm1`  | Shared helper module — one function per step             |
 | 📄 `New-Repo.ps1`      | Create a new repo — `-Kind Template` or `-Kind Code`     |
-| 📄 `Scaffold-*.psm1`| _Optional, one per layer_ — helpers + that layer's steps  |
+| 📄 `Helpers-*.psm1`| _Optional, one per layer_ — helpers + that layer's steps  |
 
 `-Kind` drives the only two differences: a **Template** keeps `scripts/` so it can spawn its
 own children, while **Code** removes `scripts/` and sets `is_template: false`.
@@ -54,7 +54,7 @@ Parameters:
 An explicit empty value (e.g. `-Homepage ''`) counts as "supplied"
 and skips that prompt.
 
-The GitHub **owner is a constant** (`$script:ScaffoldOwner` in `Scaffold.psm1`) —
+The GitHub **owner is a constant** (`$script:ScaffoldOwner` in `Helpers.psm1`) —
 this scaffolding is personal-only, so there's no owner parameter to pass. The scripts warn
 if the repo's `origin` owner doesn't match it.
 
@@ -101,25 +101,25 @@ it verifies what's done and picks up where it left off.
 - `-Kind Code` **removes** `scripts/` and sets `is_template: false`
   (a code repo isn't derived from, and outside contributors have no use for the
   personal templating infrastructure).
-- Keep `Scaffold.psm1` **and** `New-Repo.ps1` **identical at every layer** so merges stay
+- Keep `Helpers.psm1` **and** `New-Repo.ps1` **identical at every layer** so merges stay
   clean. Everything layer-specific goes in `Template.psm1` instead — the same idea as
   `_extends` for settings: shared logic inherited, deltas declared locally.
 
-### Per-layer customization: `Scaffold-<NN>-<slug>.psm1`
+### Per-layer customization: `Helpers-<NN>-<slug>.psm1`
 
 Each layer contributes one **additive** module — never by editing an inherited one:
 
 ```text
-Scaffold-10-dotnet.psm1    added by .template-dotnet
-Scaffold-20-nuget.psm1     added by .template-nuget
-Scaffold-20-winui.psm1     added by .template-winui   (sibling; never sees nuget's)
+Helpers-10-dotnet.psm1    added by .template-dotnet
+Helpers-20-nuget.psm1     added by .template-nuget
+Helpers-20-winui.psm1     added by .template-winui   (sibling; never sees nuget's)
 ```
 
 Loaded in filename order, so `<NN>` is the layer tier. Each module exports **helpers for its
 descendants to reuse**, plus exactly one entry point matching `Invoke-*Scaffold`:
 
 ```powershell
-# .template-dotnet/scripts/Scaffold-10-dotnet.psm1
+# .template-dotnet/scripts/Helpers-10-dotnet.psm1
 function Rename-DotnetPlaceholder { param($RepoPath, $To) ... }   # reusable by lower layers
 
 function Invoke-DotnetScaffold {

@@ -79,7 +79,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-Import-Module (Join-Path $PSScriptRoot 'Scaffold.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'Helpers.psm1') -Force
 Set-ScaffoldSkipPrompts $SkipManualPrompts.IsPresent
 $bound = $PSBoundParameters
 

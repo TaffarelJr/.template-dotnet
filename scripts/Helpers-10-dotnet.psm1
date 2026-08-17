@@ -1,20 +1,20 @@
 #Requires -Version 7.0
 <#
-    Scaffold-10-dotnet.psm1
+    Helpers-10-dotnet.psm1
 
     The .NET layer's contribution to scaffolding, owned by .template-dotnet and inherited by
     every repo derived from it (directly or through a deeper template such as .template-nuget).
 
-    Two roles, per the Scaffold-*.psm1 convention:
+    Two roles, per the Helpers-*.psm1 convention:
       1. HELPERS that lower layers may reuse (they are exported, and layer modules are imported
          -Global, so .template-nuget's module can call them directly).
-      2. ONE entry point matching Invoke-*Scaffold, which Scaffold.psm1 discovers and calls.
+      2. ONE entry point matching Invoke-*Scaffold, which Helpers.psm1 discovers and calls.
 
-    This file is the ONLY thing this layer should need to edit. Scaffold.psm1 and New-Repo.ps1
+    This file is the ONLY thing this layer should need to edit. Helpers.psm1 and New-Repo.ps1
     are inherited verbatim and must stay byte-identical at every layer, or every future template
     merge conflicts on them.
 
-    Anything Scaffold.psm1 EXPORTS is available here - Write-Ok, Write-Detail, Write-Skip,
+    Anything Helpers.psm1 EXPORTS is available here - Write-Ok, Write-Detail, Write-Skip,
     Rename-ScaffoldToken, Invoke-ScaffoldGatedCommit, Resolve-ScaffoldValue, Invoke-ScaffoldGit -
     but its private internals are not.
 #>
@@ -68,7 +68,7 @@ function Rename-DotnetProject {
 
 function Invoke-DotnetScaffold {
     <#
-        This layer's entry point. Scaffold.psm1 finds it by the Invoke-*Scaffold pattern and
+        This layer's entry point. Helpers.psm1 finds it by the Invoke-*Scaffold pattern and
         calls it with the scaffolding context.
 
         It owns its own commits: one concern, one commit, each independently gated so a resumed
