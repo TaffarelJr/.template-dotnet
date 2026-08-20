@@ -27,7 +27,7 @@ So you can run fully interactive, partially pre-filled, or fully unattended.
 ./scripts/New-Repo.ps1 -Kind Template -Name dotnet
 
 # fully unattended - no prompts at all (scriptable / batchable)
-./scripts/New-Repo.ps1 -Kind Code -Name my-service -GhAccount TaffarelJr `
+./scripts/New-Repo.ps1 -Kind Code -Name my-service `
     -Description 'My service' -Homepage '' -Topics 'dotnet, service' `
     -CodecovToken $env:CODECOV -SkipManualPrompts
 ```
@@ -37,17 +37,12 @@ Parameters:
 - `-Kind` — `Template` (a new layer) or `Code` (a leaf repo). Default: `Code`.
 - `-Name` — the new repo name, in kebab-case. For `-Kind Template` the `.template-`
   prefix is optional: `dotnet` and `.template-dotnet` both give `.template-dotnet`.
-- `-GhAccount` — the gh account that admins the owner;
-  the script switches to it and verifies admin access first
-  (blank = use the current account).
 - `-Description` — the repo description for `settings.yml`
   (must be a single line).
 - `-Homepage` — the repo homepage URL for `settings.yml` (empty to omit it).
 - `-Topics` — the repo topics for `settings.yml` (comma-separated).
 - `-CodecovToken` — the `CODECOV_TOKEN` secret value
   (empty to skip; prompted without echo when omitted).
-- `-TemplateBranch` — the template-remote branch to base `main` on
-  (default: `main`).
 - `-SkipManualPrompts` — skip every prompt and the confirmation gate;
   required for a truly unattended run.
 
@@ -102,8 +97,8 @@ it verifies what's done and picks up where it left off.
   (a code repo isn't derived from, and outside contributors have no use for the
   personal templating infrastructure).
 - Keep `Helpers.psm1` **and** `New-Repo.ps1` **identical at every layer** so merges stay
-  clean. Everything layer-specific goes in `Template.psm1` instead — the same idea as
-  `_extends` for settings: shared logic inherited, deltas declared locally.
+  clean. Everything layer-specific goes in a `Helpers-<NN>-<slug>.psm1` instead — the same
+  idea as `_extends` for settings: shared logic inherited, deltas declared locally.
 
 ### Per-layer customization: `Helpers-<NN>-<slug>.psm1`
 
@@ -120,16 +115,16 @@ descendants to reuse**, plus exactly one entry point matching `Invoke-*Scaffold`
 
 ```powershell
 # .template-dotnet/scripts/Helpers-10-dotnet.psm1
-function Rename-DotnetPlaceholder { param($RepoPath, $To) ... }   # reusable by lower layers
+function Rename-DotnetProject { param($RepoPath, $To) ... }   # reusable by lower layers
 
 function Invoke-DotnetScaffold {
     param([hashtable]$Context)   # RepoPath, RepoName, Kind, OwnerRepo, SourceOwnerRepo
-    Rename-DotnetPlaceholder -RepoPath $Context.RepoPath -To $Context.RepoName
+    Rename-DotnetProject -RepoPath $Context.RepoPath -To $Context.RepoName
 }
-Export-ModuleMember -Function Rename-DotnetPlaceholder, Invoke-DotnetScaffold
+Export-ModuleMember -Function Rename-DotnetProject, Invoke-DotnetScaffold
 ```
 
-A lower layer can then call `Rename-DotnetPlaceholder` directly — the modules are imported
+A lower layer can then call `Rename-DotnetProject` directly — the modules are imported
 `-Global`, so every layer's helpers are visible to the layers below it. That's the point of
 using modules rather than plain scripts.
 
@@ -146,9 +141,24 @@ Layers are read from the **source** template — wherever `New-Repo.ps1` is runn
 leaf still gets its ancestors' renames even though scaffolding deletes the leaf's own
 `scripts/` folder. Base layers with nothing to customize contribute no file.
 
-All their changes land in one commit, `chore: apply template-specific customizations`. You
-don't declare which paths you touch: the module diffs `git status` around the calls and stages
-exactly that set, so unrelated uncommitted work can never be swept in.
+**Each layer owns its own commits.** A layer that does several unrelated things should make
+several commits, by calling the exported `Invoke-GatedCommit` itself:
+
+```powershell
+Invoke-GatedCommit -RepoPath $Context.RepoPath `
+    -Message 'chore: rename the placeholder project' -Body { ... }
+```
+
+Each commit is then independently gated, so a resumed run skips only what's already done.
+
+`-Paths` is **optional**. Omit it and the body's changes are detected by diffing `git status`
+around the call, staging exactly what it touched — which is what you want for anything
+repo-wide such as a placeholder rename, where a hand-maintained path list would silently
+leave renamed files out of the commit. Either way your own uncommitted work is excluded by
+construction, so it can never be swept in.
+
+If a layer changes files and commits nothing, the run warns — every later step stages an
+explicit pathspec, so those changes would otherwise be left behind for good.
 
 ### Settings inheritance
 

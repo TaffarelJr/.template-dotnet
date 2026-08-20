@@ -17,8 +17,8 @@
     every layer, or every future template merge conflicts on them.
 
     Anything Helpers.psm1 exports is available here - Write-Ok, Write-Detail,
-    Write-Skip, Rename-ScaffoldToken, Invoke-ScaffoldGatedCommit,
-    Resolve-ScaffoldInput, Invoke-ScaffoldGit - but its internals are not.
+    Write-Skip, Rename-Token, Invoke-GatedCommit,
+    Resolve-Input, Invoke-Git - but its internals are not.
 #>
 
 Set-StrictMode -Version Latest
@@ -29,7 +29,7 @@ $ErrorActionPreference = 'Stop'
 
 # The token this template's .NET payload uses for the project, assembly and
 # namespace name. It appears in directory names, file names AND file content,
-# which is why renaming it needs Rename-ScaffoldToken, not a find/replace.
+# which is why renaming it needs Rename-Token, not a find/replace.
 $script:DotnetPlaceholder = 'Placeholder'
 
 function ConvertTo-DotnetProjectName {
@@ -80,7 +80,7 @@ function Rename-DotnetProject {
         [Parameter(Mandatory)][string]$RepoPath,
         [Parameter(Mandatory)][string]$To
     )
-    Rename-ScaffoldToken -RepoPath $RepoPath `
+    Rename-Token -RepoPath $RepoPath `
         -From $script:DotnetPlaceholder -To $To
 }
 
@@ -98,14 +98,14 @@ function Invoke-DotnetScaffold {
     # add its own. Declared rather than left to GitHub's auto-detection, which
     # only sees what exists the moment default setup is switched on - so a
     # template enabled while still empty would never analyse its later C#.
-    Add-ScaffoldCodeqlLanguage csharp
+    Add-CodeqlLanguage csharp
 
     $default = ConvertTo-DotnetProjectName -RepoName $Context.RepoName
 
     # -Bound @{} means "nothing was supplied on the command line", so this
     # prompts with the derived default - and returns that default untouched
     # during an unattended run.
-    $projectName = Resolve-ScaffoldInput -Name DotnetProjectName `
+    $projectName = Resolve-Input -Name DotnetProjectName `
         -Bound @{} -Value '' -Default $default `
         -Prompt 'Project / root-namespace name (PascalCase)'
 
@@ -115,7 +115,7 @@ function Invoke-DotnetScaffold {
             'use PascalCase, optionally dotted.')
     }
 
-    Invoke-ScaffoldGatedCommit -RepoPath $Context.RepoPath `
+    Invoke-GatedCommit -RepoPath $Context.RepoPath `
         -Message 'chore: rename the placeholder project' -Body {
         Rename-DotnetProject -RepoPath $Context.RepoPath -To $projectName
     }
