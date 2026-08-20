@@ -2,7 +2,7 @@
 
 <#
 .SYNOPSIS
-    Create a new repo derived from THIS template repo -
+    Creates a new repo derived from THIS template repo -
     either another TEMPLATE layer or a plain CODE repo.
 
 .DESCRIPTION
@@ -94,6 +94,7 @@ $bound = $PSBoundParameters
 
 # Show terminating errors as a readable banner, not a raw PowerShell dump,
 # and release the borrowed gh token on the way out.
+# The trap also fires on Ctrl-C, so the token never outlives the run.
 trap {
     Remove-LayerModule
     Reset-GhAccount
@@ -155,7 +156,9 @@ if (-not $bound.ContainsKey('CodecovToken')) {
         "https://app.codecov.io/account/gh/$owner/org-upload-token"
 }
 $CodecovToken = Resolve-Input -Name CodecovToken -Bound $bound `
-    -Value $CodecovToken -Prompt 'CODECOV_TOKEN value (blank to skip)' -Secret
+    -Value $CodecovToken `
+    -Prompt 'CODECOV_TOKEN value (blank to skip)' `
+    -Secret
 
 if (-not (Confirm-Proceed -OwnerRepo $ownerRepo)) { return }
 
@@ -184,19 +187,23 @@ Set-CodecovSecret           -OwnerRepo $ownerRepo -Token $CodecovToken
 Write-Step '3' 'Clone the new repo'
 # Preserves the origin URL style, including any custom SSH host alias.
 $originUrl = Get-NewRepoUrl -Context $ctx -RepoName $repo
-Initialize-Clone -OriginUrl $originUrl -TargetPath $targetPath `
+Initialize-Clone -OriginUrl $originUrl `
+    -TargetPath $targetPath `
     -TemplateUrl $ctx.SourceUrl
 
 #───────────────────────────────────────────────────────────────────────────────
 # Step 4: drop what belongs only to the parent
 #───────────────────────────────────────────────────────────────────────────────
 
-# Deletions run BEFORE the README pass, so the README stops documenting
-# files that have already gone, rather than the other way round.
+# Deletions run BEFORE the README pass,
+# so the README stops documenting files that have already gone,
+# rather than the other way round.
 Write-Step '4' 'Remove template-only files'
+$paths = @('.github', 'README.md', 'scripts')
 Invoke-GatedCommit -RepoPath $targetPath `
     -Message 'chore: remove template-only files' `
-    -Paths @('.github', 'README.md', 'scripts') -Body {
+    -Paths $paths `
+    -Body {
     Remove-TemplateOnlyFiles -RepoPath $targetPath
     if ($Kind -eq 'Code') { Remove-ScriptsFolder -RepoPath $targetPath }
     Update-Readme            -RepoPath $targetPath
@@ -207,17 +214,19 @@ Invoke-GatedCommit -RepoPath $targetPath `
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '5' 'Retarget template references'
+$paths = @(
+    '.github/ISSUE_TEMPLATE'
+    'CONTRIBUTING.md'
+    'SECURITY.md'
+    'SUPPORT.md'
+)
 Invoke-GatedCommit -RepoPath $targetPath `
     -Message 'chore: retarget template references' `
-    -Paths @(
-        '.github/ISSUE_TEMPLATE'
-        'CONTRIBUTING.md'
-        'SECURITY.md'
-        'SUPPORT.md'
-    ) `
+    -Paths $paths `
     -Body {
     Update-RepoReferences -RepoPath $targetPath `
-        -OldOwnerRepo $ctx.SourceOwnerRepo -NewOwnerRepo $ownerRepo
+        -OldOwnerRepo $ctx.SourceOwnerRepo `
+        -NewOwnerRepo $ownerRepo
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -225,9 +234,11 @@ Invoke-GatedCommit -RepoPath $targetPath `
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '6' 'Enable Template Sync'
+$paths = @('.github/workflows/template-sync.yml')
 Invoke-GatedCommit -RepoPath $targetPath `
     -Message 'ci: enable the template sync schedule' `
-    -Paths @('.github/workflows/template-sync.yml') -Body {
+    -Paths $paths `
+    -Body {
     Set-TemplateSyncConfig -RepoPath $targetPath `
         -TemplateOwnerRepo $ctx.SourceOwnerRepo
 }
@@ -250,13 +261,19 @@ Invoke-LayerModule -RepoPath $targetPath -Context @{
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '8' 'Customize repo settings'
+$paths = @('.github/settings.yml')
 Invoke-GatedCommit -RepoPath $targetPath `
     -Message 'chore: customize repo settings' `
-    -Paths @('.github/settings.yml') -Body {
+    -Paths $paths `
+    -Body {
     # _extends resolves recursively, so this inherits the whole chain.
-    Write-SettingsFile -RepoPath $targetPath -Kind $Kind -Name $repo `
+    Write-SettingsFile -RepoPath $targetPath `
+        -Kind $Kind `
+        -Name $repo `
         -ExtendsRepo $ctx.SourceRepo `
-        -Description $Description -Homepage $Homepage -Topics $Topics
+        -Description $Description `
+        -Homepage $Homepage `
+        -Topics $Topics
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -265,7 +282,7 @@ Invoke-GatedCommit -RepoPath $targetPath `
 
 Write-Step '9' 'Push & enable CodeQL'
 Push-Repo     -RepoPath $targetPath
-Enable-Codeql -OwnerRepo $ownerRepo   # now that code/workflows exist
+Enable-Codeql -OwnerRepo $ownerRepo   # only now does the repo have content
 
 #───────────────────────────────────────────────────────────────────────────────
 # Step 10: initialize workflows, if anything changed
@@ -284,13 +301,18 @@ else {
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '11' 'Set up the VS Code workspace'
-# Exclude BEFORE creating: if the run dies between the two, an unexcluded
-# workspace file would be committed and then synced to every descendant.
+# Exclude BEFORE creating:
+# if the run dies between the two,
+# an unexcluded workspace file would be committed,
+# and then synced to every descendant.
 Add-GitExclude -RepoPath $targetPath -Pattern "$repo.code-workspace"
-# Chain = the source template plus every ancestor cloned locally, nearest first.
+
+# The chain is the source template plus every ancestor cloned locally,
+# nearest first.
 $chain = Get-TemplateChain -StartRepoPath $ctx.SourceRoot `
     -ParentDir $ctx.ParentDir
-$wsFile = Write-WorkspaceFile -RepoPath $targetPath -RepoName $repo `
+$wsFile = Write-WorkspaceFile -RepoPath $targetPath `
+    -RepoName $repo `
     -ChainPaths $chain
 Start-VSCode -Target $wsFile
 

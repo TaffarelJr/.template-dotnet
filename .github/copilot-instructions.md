@@ -1,19 +1,18 @@
 # Instructions for Copilot
 
-## Coding Standards and Conventions
+The rules are in [AGENTS.md][agentsFile], which Copilot reads directly.
+This file exists only for surfaces that look for
+`copilot-instructions.md` and nothing else.
 
-- Follow existing patterns, code styles, spacing, and naming conventions first.
-- Follow instructions in code comments where found.
-- Follow the [Styleguide](../docs/Styleguide.md) for the specific language.
-  - Pay special attention to the guides about security and performance.
-- Keep lines short, following the [Vertical Ruler](../docs/VerticalRulers.md) document.
-- In Markdown, footnotes are preferred for URLs to keep text lines short.
-- Use [Conventional Commits](../docs/ConventionalCommits.md) for commit messages.
-  - We use a custom `infra` type for things like Terraform changes.
+Path-scoped rules are in [.github/instructions/][instructionsFolder]
+and are applied automatically by their `applyTo` globs.
 
-## Branching and Feature Development
+Reference material lives in [docs/][docsFolder].
+See [docs/AiInstructions.md][aiFile] for how the pieces fit together.
 
-When implementing a new feature, always make sure the branch isn't `main`.
-If it is, create a new feature branch and switch to it before making any changes.
-Name the branch descriptively (e.g., `awesome-feature-name`).
-The feature name should be concise and describe what is being implemented.
+<!-- Source Code URIs (alphabetical by file hierarchy) -->
+
+[instructionsFolder]: ./instructions/
+[aiFile]: ../docs/AiInstructions.md
+[docsFolder]: ../docs/
+[agentsFile]: ../AGENTS.md

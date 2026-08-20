@@ -1,18 +1,20 @@
 #Requires -Version 7.0
 <#
-    Shared helpers for New-Repo.ps1, which creates a new repo derived from the
-    template repo it is run from. See scripts/README.md for the design.
+    Shared helpers for New-Repo.ps1,
+    which creates a new repo derived from the template repo it is run from.
+    See scripts/README.md for the design.
 
-    Keep this file identical at every layer: it is inherited by merge, so a
-    per-layer edit conflicts on every future template change. Layer-specific
-    behaviour goes in an additive Helpers-<NN>-<slug>.psm1 alongside it.
+    Keep this file identical at every layer: it is inherited by merge,
+    so a per-layer edit conflicts on every future template change.
+    Layer-specific behaviour goes in an additive Helpers-<NN>-<slug>.psm1.
 #>
 
 Set-StrictMode -Version Latest
 
-# Module scope has its own preference, so the calling script's 'Stop' does not
-# reach these functions. Without this a failing cmdlet would be reported as a
-# success by the Write-Ok on the next line.
+# Module scope has its own preference,
+# so the calling script's 'Stop' does not reach these functions.
+# Without this, a failing cmdlet would be reported as a success
+# by the Write-Ok on the next line.
 $ErrorActionPreference = 'Stop'
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -25,8 +27,8 @@ $script:TemplateBranch = 'main'
 function Get-RepoOwner {
     <#
     .SYNOPSIS
-        The GitHub account that owns every template layer and every repo derived
-        from one.
+        Returns the GitHub account that owns every template layer,
+        and everything derived from one.
     #>
     return $script:RepoOwner
 }
@@ -34,7 +36,7 @@ function Get-RepoOwner {
 function Get-TemplateBranch {
     <#
     .SYNOPSIS
-        The branch every template is tracked on. Always 'main'.
+        Returns the branch every template is tracked on. Always 'main'.
     #>
     return $script:TemplateBranch
 }
@@ -46,33 +48,36 @@ function Get-TemplateBranch {
 function Get-LayerModule {
     <#
     .SYNOPSIS
-        The Helpers-<NN>-<slug>.psm1 layer modules in this chain, in load order.
+        Finds this chain's Helpers-<NN>-<slug>.psm1 layer modules, in load order.
     .DESCRIPTION
-        <NN> is the layer tier, since alphabetical order does not match
-        ancestry. The extension is checked explicitly because a Windows -Filter
-        of '*.psm1' matches loosely.
+        <NN> is the layer tier, since alphabetical order does not match ancestry.
+        The extension is checked explicitly
+        because a Windows -Filter of '*.psm1' matches loosely.
     #>
-    return @(Get-ChildItem -Path $PSScriptRoot -Filter 'Helpers-*' -File `
-        -ErrorAction SilentlyContinue |
-            Where-Object { $_.Extension -eq '.psm1' } | Sort-Object Name)
+    $files = Get-ChildItem -Path $PSScriptRoot `
+        -Filter 'Helpers-*' `
+        -File `
+        -ErrorAction SilentlyContinue
+    $files = $files | Where-Object { $_.Extension -eq '.psm1' }
+    return @($files | Sort-Object Name)
 }
 
 function Import-LayerModule {
     <#
     .SYNOPSIS
-        Loads every layer module and returns its module/entry-point pairs in
-        order.
+        Loads every layer module and returns its module/entry-point pairs in order.
     .DESCRIPTION
-        Imported -Global so each layer's exported helpers are visible to the
-        layers below it. The entry point is found from the module's own
-        ExportedFunctions by the Invoke-*Scaffold pattern, so it is never
-        coupled to the filename.
+        Imported -Global, so each layer's exported helpers are visible
+        to the layers below it.
+        The entry point is found from the module's own ExportedFunctions
+        by the Invoke-*Scaffold pattern, so it is never coupled to the filename.
     #>
     $loaded = [System.Collections.Generic.List[object]]::new()
     foreach ($file in Get-LayerModule) {
         $mod = Import-Module $file.FullName -Force -Global -PassThru
-        $entry = @($mod.ExportedFunctions.Values |
-                Where-Object { $_.Name -like 'Invoke-*Scaffold' })
+        $pattern = 'Invoke-*Scaffold'
+        $exported = $mod.ExportedFunctions.Values
+        $entry = @($exported | Where-Object { $_.Name -like $pattern })
         if ($entry.Count -ne 1) {
             $found = if ($entry) { ": $($entry.Name -join ', ')" }
             throw ("$($file.Name) must export exactly one " +
@@ -91,8 +96,7 @@ function Import-LayerModule {
 function Remove-LayerModule {
     <#
     .SYNOPSIS
-        Unload the layer modules so an interactive session isn't left holding
-        them.
+        Unloads the layer modules so an interactive session isn't left holding them.
     #>
     foreach ($file in Get-LayerModule) {
         $name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
@@ -100,10 +104,10 @@ function Remove-LayerModule {
     }
 }
 
-# Files that exist ONLY in the base .github repo. Single source of truth: the
-# same table drives both the deletion and the README de-linking, so the two
-# can't drift apart. 'Label' is the markdown link-reference label the README
-# uses for that file.
+# Files that exist ONLY in the base .github repo.
+# Single source of truth: the same table drives both the deletion
+# and the README de-linking, so the two can't drift apart.
+# 'Label' is the markdown link-reference label the README uses for that file.
 $script:TemplateOnlyFiles = @(
     @{ Path = '.github/FUNDING.yml'; Label = 'fundingFile' }
     @{ Path = '.github/ISSUE_TEMPLATE/config.yml'; Label = 'issueChooserFile' }
@@ -128,8 +132,9 @@ $script:OkCount = 0
 $script:SkipCount = 0
 $script:WarnCount = 0
 
-# Not a tally: did this run change anything? Gates the Template Sync dispatch
-# and the "already fully scaffolded" message; no-ops must not count.
+# Not a tally: did this run change anything?
+# Gates the Template Sync dispatch and the "already fully scaffolded" message,
+# so a successful no-op must not count.
 $script:ChangeCount = 0
 
 $script:Rule = '─' * 72
@@ -175,8 +180,8 @@ function Add-Change { $script:ChangeCount++ }
 
 # Aligned label/value pair, for the run header in step 0.
 function Write-Field {
-    # An empty -Label is allowed: it renders a continuation line under the field
-    # above.
+    # An empty -Label is allowed:
+    # it renders a continuation line under the field above.
     param(
         [Parameter(Mandatory)][AllowEmptyString()][string]$Label,
         [string]$Value
@@ -185,6 +190,10 @@ function Write-Field {
 }
 
 function Assert-LastExit {
+    <#
+    .SYNOPSIS
+        Throws if the last native command exited non-zero.
+    #>
     param([Parameter(Mandatory)][string]$What)
     if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE)" }
 }
@@ -192,8 +201,8 @@ function Assert-LastExit {
 function Format-Slug {
     <#
     .SYNOPSIS
-        Normalise and validate a repo-name slug. One regex, one error wording,
-        both scripts.
+        Normalises and validates a repo-name slug:
+        one regex and one error wording for the whole chain.
     #>
     param(
         [Parameter(Mandatory)][string]$Value,
@@ -208,10 +217,13 @@ function Format-Slug {
 
 function Confirm-Proceed {
     <#
-        Final go/no-go gate. Returns $true when the run should continue. Honours
-        the module's own skip-prompts state rather than a second copy of the
-        switch in each script, and reports an abort through Write-Warn so it
-        looks like every other warning.
+    .SYNOPSIS
+        Returns $true when the run should continue - the final go/no-go gate.
+    .DESCRIPTION
+        Honours the module's own skip-prompts state,
+        rather than a second copy of the switch in each script,
+        and reports an abort through Write-Warn,
+        so it looks like every other warning.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
     if ($script:SkipManualPrompts) { return $true }
@@ -225,8 +237,7 @@ function Confirm-Proceed {
 function Write-Step {
     <#
     .SYNOPSIS
-        Start a step. Records it so a failure banner can name where things went
-        wrong.
+        Starts a step, recording it so a failure banner can name what went wrong.
     #>
     param(
         [Parameter(Mandatory)][string]$Number,
@@ -236,26 +247,33 @@ function Write-Step {
     $script:CurrentStepTitle = $Title
     $head = "═══ STEP $Number · $Title "
     Write-Host ""
-    Write-Host ($head + ('═' * [Math]::Max(0, 72 - $head.Length))) `
-        -ForegroundColor Cyan
+    $pad = '═' * [Math]::Max(0, 72 - $head.Length)
+    Write-Host ($head + $pad) -ForegroundColor Cyan
 }
 
+# Reports whether this run changed anything; see Add-Change.
 function Get-ChangeCount { return $script:ChangeCount }
 
 function Show-Summary {
-    <# One-line tally so the end of a run is readable at a glance. #>
+    <#
+    .SYNOPSIS
+        Prints a one-line tally, so the end of a run reads at a glance.
+    #>
     Write-Host ""
-    Write-Host ("  {0} ok · {1} already done · {2} warning(s)" -f `
-            $script:OkCount, $script:SkipCount, $script:WarnCount) `
-                -ForegroundColor Gray
+    $tally = '  {0} ok · {1} already done · {2} warning(s)'
+    $counts = $script:OkCount, $script:SkipCount, $script:WarnCount
+    Write-Host ($tally -f $counts) -ForegroundColor Gray
 }
 
 function Show-Failure {
     <#
-        Render a terminating error as a readable banner instead of a raw
-        PowerShell dump: which step failed, the message, the offending line, and
-        the script stack trace. Scaffolding is resumable, so it also says what
-        to do next.
+    .SYNOPSIS
+        Renders a terminating error as a readable banner,
+        instead of a raw PowerShell dump.
+    .DESCRIPTION
+        Reports which step failed, the message, the offending line,
+        and the script stack trace.
+        Scaffolding is resumable, so it also says what to do next.
     #>
     param([Parameter(Mandatory)]$ErrorRecord)
     Write-Host ""
@@ -292,13 +310,15 @@ function Show-Failure {
 
 function Invoke-Git {
     <#
-        Run git with its chatter CAPTURED rather than dumped to the console, and
-        turn a non-zero exit into a clean error that includes git's own output
-        as detail.
+    .SYNOPSIS
+        Runs git with its chatter captured rather than dumped to the console.
+    .DESCRIPTION
+        Turns a non-zero exit into a clean error,
+        with git's own output included as detail.
 
-        Only for calls where failure is genuinely an error. Calls that USE the
-        exit code as a boolean (show-ref --quiet, diff --cached --quiet,
-        rev-parse --verify) stay raw.
+        Only for calls where failure is genuinely an error.
+        Calls that USE the exit code as a boolean stay raw -
+        show-ref --quiet, diff --cached --quiet, rev-parse --verify.
     #>
     param(
         [Parameter(Mandatory)][string]$What,
@@ -323,8 +343,8 @@ function Invoke-Git {
 function Invoke-Gh {
     <#
     .SYNOPSIS
-        Same as Invoke-Git, for the gh CLI. -Arguments must be an
-        explicit array.
+        Runs gh exactly as Invoke-Git runs git.
+        -Arguments must be an explicit array.
     #>
     param(
         [Parameter(Mandatory)][string]$What,
@@ -340,6 +360,10 @@ function Invoke-Gh {
 }
 
 function Set-SkipPrompts {
+    <#
+    .SYNOPSIS
+        Suppresses every prompt, for an unattended run.
+    #>
     param([Parameter(Mandatory)][bool]$Skip)
     $script:SkipManualPrompts = $Skip
 }
@@ -350,15 +374,17 @@ function Set-SkipPrompts {
 
 function Resolve-Input {
     <#
-        Return a value that may come from the command line or a prompt.
-
-        - If the caller passed the parameter (tracked in
-          $Bound = $PSBoundParameters), use $Value as-is and DO NOT prompt,
+    .SYNOPSIS
+        Returns a value that may come from the command line or a prompt.
+    .DESCRIPTION
+        - If the caller passed the parameter
+          (tracked in $Bound = $PSBoundParameters),
+          uses $Value as-is and does NOT prompt,
           even if it is an empty string.
         - Otherwise, if prompts are suppressed (Set-SkipPrompts $true),
-          return $Default without prompting, so unattended runs never block.
-        - Otherwise prompt. A non-empty -Default is shown as [default];
-          ENTER accepts it. -Secret prompts without echo, for tokens.
+          returns $Default without prompting, so unattended runs never block.
+        - Otherwise prompts. A non-empty -Default is shown as [default],
+          and ENTER accepts it. -Secret prompts without echo, for tokens.
     #>
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -386,6 +412,10 @@ function Resolve-Input {
 #───────────────────────────────────────────────────────────────────────────────
 
 function Add-ManualItem {
+    <#
+    .SYNOPSIS
+        Adds one entry to the end-of-run manual checklist.
+    #>
     param(
         [Parameter(Mandatory)][string]$Category,
         [Parameter(Mandatory)][string]$Title,
@@ -401,7 +431,7 @@ function Add-ManualItem {
 function Register-ManualSettings {
     <#
     .SYNOPSIS
-        The four repo settings GitHub only exposes in the web UI (no REST API).
+        Queues the repo settings GitHub only exposes in the web UI (no REST API).
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
     # NB: release immutability is NOT listed here - it has a real API now,
@@ -409,31 +439,53 @@ function Register-ManualSettings {
     # list only if the call fails.
     $cat = 'GitHub settings — web UI only (no API)'
     $url = "https://github.com/$OwnerRepo/settings"
+
+    $steps = @(
+        "$url  →  General"
+        "check 'Limit how many branches and tags can be updated"
+        "in a single push'  →  set 2"
+    )
     Add-ManualItem -Category $cat `
         -Title 'Limit branches/tags updated per push to 2' `
-        -Steps @("$url  →  General",
-        "check 'Limit how many branches and tags can be updated",
-        "in a single push'  →  set 2")
+        -Steps $steps
+
+    $steps = @(
+        "$url  →  Moderation options  →  Code review limits"
+        "check 'Limit to users explicitly granted read or higher access'"
+    )
     Add-ManualItem -Category $cat `
         -Title 'Restrict code review to users with read+ access' `
-        -Steps @("$url  →  Moderation options  →  Code review limits",
-        "check 'Limit to users explicitly granted read or higher access'")
+        -Steps $steps
+
+    $steps = @(
+        "$url/security_analysis  →  enable 'Grouped security updates'"
+    )
     Add-ManualItem -Category $cat `
         -Title 'Enable grouped security updates' `
-        -Steps @("$url/security_analysis  →  enable 'Grouped security updates'")
+        -Steps $steps
+
+    $steps = @(
+        "$url/security_analysis  →  enable 'Dependency graph'"
+        'Public repos always have it on; the toggle is not offered.'
+    )
     Add-ManualItem -Category $cat `
         -Title 'Enable the Dependency graph — only if this repo is PRIVATE' `
-        -Steps @(
-            "$url/security_analysis  →  enable 'Dependency graph'",
-            'Public repos always have it on; the toggle is not offered.'
-        )
+        -Steps $steps
+
+    $steps = @(
+        "https://github.com/$OwnerRepo"
+        'the Settings app applies settings.yml within a few minutes'
+    )
     Add-ManualItem -Category $cat `
         -Title 'Verify the description and topics appear on the home page' `
-        -Steps @("https://github.com/$OwnerRepo",
-        'the Settings app applies settings.yml within a few minutes')
+        -Steps $steps
 }
 
 function Show-ManualChecklist {
+    <#
+    .SYNOPSIS
+        Prints everything Add-ManualItem queued, grouped by category.
+    #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
     if ($script:ManualItems.Count -eq 0) {
         Write-Host "`n✅ No manual follow-up needed." -ForegroundColor Green
@@ -468,9 +520,12 @@ function Show-ManualChecklist {
 
 function Get-TemplateContext {
     <#
-        Discover the SOURCE template repo from the calling script's location.
-        The scripts live in <templateRepo>/scripts, so the repo root is the
-        parent of $ScriptRoot and new repos are cloned next to it (ParentDir).
+    .SYNOPSIS
+        Discovers the SOURCE template repo from the calling script's location.
+    .DESCRIPTION
+        The scripts live in <templateRepo>/scripts,
+        so the repo root is the parent of $ScriptRoot,
+        and new repos are cloned next to it (ParentDir).
     #>
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ScriptRoot)
@@ -515,15 +570,16 @@ function Get-TemplateContext {
 function Get-ActiveGhAccount {
     <#
     .SYNOPSIS
-        The login gh is currently authenticating as, or $null if the call
-        failed.
+        Returns the login gh is authenticating as, or $null if the call failed.
     .DESCRIPTION
-        gh writes error bodies to STDOUT, so a failed call returns JSON
-        rather than nothing - which would otherwise be captured and later fed
-        to `gh auth switch --user`. Guard on the exit code, then reject
-        anything with JSON punctuation in it. Deny-listing rather than
-        allow-listing, because logins legitimately contain characters like the
-        underscore in enterprise-managed accounts.
+        gh writes error bodies to STDOUT,
+        so a failed call returns JSON rather than nothing -
+        which would otherwise be captured and later fed to
+        `gh auth switch --user`.
+        Guard on the exit code, then reject anything with JSON punctuation.
+        Deny-listing rather than allow-listing,
+        because logins legitimately contain characters like the underscore
+        in enterprise-managed accounts.
     #>
     $login = gh api user --jq .login 2>$null
     $ok = ($LASTEXITCODE -eq 0)
@@ -537,20 +593,21 @@ function Get-ActiveGhAccount {
 function Use-GhAccount {
     <#
     .SYNOPSIS
-        Points this process's gh calls at the repo owner and verifies it has
-        admin access.
+        Points this process's gh calls at the repo owner,
+        then verifies it has admin access.
     .DESCRIPTION
-        Borrows the owner's token into $env:GH_TOKEN rather than running
-        `gh auth switch`, which would repoint every other shell on the machine.
-        Records any prior GH_TOKEN and active account first, so
-        Reset-GhAccount can put both back exactly as they were.
+        Borrows the owner's token into $env:GH_TOKEN,
+        rather than running `gh auth switch`,
+        which would repoint every other shell on the machine.
+        Records any prior GH_TOKEN and active account first,
+        so Reset-GhAccount can put both back exactly as they were.
     #>
     param([Parameter(Mandatory)][string]$ProbeOwnerRepo)
 
     $account = $script:RepoOwner
 
-    # Push the state we are about to change, so the pop can be exact rather than
-    # approximate.
+    # Push the state we are about to change,
+    # so the pop can be exact rather than approximate.
     $script:PriorGhToken = $env:GH_TOKEN
     $script:PriorGhAccount = Get-ActiveGhAccount
     $script:GhStatePushed = $true
@@ -589,10 +646,10 @@ function Use-GhAccount {
         throw "Not authenticated with gh. Run 'gh auth login' first."
     }
 
-    # Admin probe: being logged in is not the same as having the
-    # scopes/permissions we need.
-    gh api "repos/$ProbeOwnerRepo/actions/permissions/workflow" --silent `
-        2>$null | Out-Null
+    # Admin probe:
+    # being logged in is not the same as having the scopes we need.
+    $probe = "repos/$ProbeOwnerRepo/actions/permissions/workflow"
+    gh api $probe --silent 2>$null | Out-Null
     $ok = ($LASTEXITCODE -eq 0)
     $global:LASTEXITCODE = 0
     if (-not $ok) {
@@ -606,13 +663,14 @@ function Use-GhAccount {
 function Reset-GhAccount {
     <#
     .SYNOPSIS
-        Restores the gh token and active account recorded by
-        Use-GhAccount.
+        Restores the gh token and active account recorded by Use-GhAccount.
     .DESCRIPTION
-        Puts back a GH_TOKEN that was already set rather than just clearing
-        ours, and switches the active account back if `gh auth login` changed
-        it. Safe to call more than once, and a no-op if nothing was ever
-        pushed - so it can run on both the success and failure paths.
+        Puts back a GH_TOKEN that was already set,
+        rather than just clearing ours,
+        and switches the active account back if `gh auth login` changed it.
+        Safe to call more than once,
+        and a no-op if nothing was ever pushed,
+        so it can run on both the success and failure paths.
     #>
     if (-not $script:GhStatePushed) { return }
 
@@ -642,7 +700,10 @@ function Reset-GhAccount {
 #───────────────────────────────────────────────────────────────────────────────
 
 function New-GitHubRepo {
-    <# Create an empty public repo. No-op if it already exists. #>
+    <#
+    .SYNOPSIS
+        Creates an empty public repo. No-op if it already exists.
+    #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
     gh repo view $OwnerRepo --json name 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
@@ -662,15 +723,16 @@ function New-GitHubRepo {
 function Set-ActionsPermissions {
     <#
     .SYNOPSIS
-        Allow GitHub Actions to create and approve PRs (preserves default
-        perms).
+        Allows GitHub Actions to create and approve PRs,
+        preserving the default permissions.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
-    # gh writes its error body to STDOUT, so a failed GET still parses - into an
-    # object with message/status. Under StrictMode, reading a missing property
-    # throws, so test first.
-    $cur = gh api "repos/$OwnerRepo/actions/permissions/workflow" 2>$null |
-        ConvertFrom-Json
+    # gh writes its error body to STDOUT,
+    # so a failed GET still parses - into an object with message/status.
+    # Under StrictMode, reading a missing property throws, so test first.
+    $endpoint = "repos/$OwnerRepo/actions/permissions/workflow"
+    $json = gh api $endpoint 2>$null
+    $cur = $json | ConvertFrom-Json
     $global:LASTEXITCODE = 0
     $props = if ($cur) { @($cur.PSObject.Properties.Name) } else { @() }
 
@@ -682,28 +744,32 @@ function Set-ActionsPermissions {
         $cur.default_workflow_permissions
     }
     else { 'read' }
+    $ghArgs = @(
+        'api', '--method', 'PUT', $endpoint
+        '-f', "default_workflow_permissions=$perm"
+        '-F', 'can_approve_pull_request_reviews=true'
+    )
     Invoke-Gh -What 'Allowing Actions to create and approve PRs' `
-        -Arguments @(
-        'api', '--method', 'PUT',
-        "repos/$OwnerRepo/actions/permissions/workflow",
-        '-f', "default_workflow_permissions=$perm",
-        '-F', 'can_approve_pull_request_reviews=true') | Out-Null
+        -Arguments $ghArgs | Out-Null
     Add-Change
     Write-Ok "Actions: allowed to create and approve pull requests"
 }
 
 function Enable-PrivateVulnReporting {
+    <#
+    .SYNOPSIS
+        Enables private vulnerability reporting. No-op if already on.
+    #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
-    $enabled = gh api "repos/$OwnerRepo/private-vulnerability-reporting" `
-        --jq '.enabled' 2>$null
+    $endpoint = "repos/$OwnerRepo/private-vulnerability-reporting"
+    $enabled = gh api $endpoint --jq '.enabled' 2>$null
     if ($LASTEXITCODE -eq 0 -and $enabled -eq 'true') {
-        Write-Skip 'Private vulnerability reporting already enabled'; return
+        Write-Skip 'Private vulnerability reporting already enabled'
+        return
     }
+    $ghArgs = @('api', '--method', 'PUT', $endpoint, '--silent')
     Invoke-Gh -What 'Enabling private vulnerability reporting' `
-        -Arguments @(
-        'api', '--method', 'PUT',
-        "repos/$OwnerRepo/private-vulnerability-reporting",
-        '--silent') | Out-Null
+        -Arguments $ghArgs | Out-Null
     Add-Change
     Write-Ok "Enabled private vulnerability reporting"
 }
@@ -711,8 +777,8 @@ function Enable-PrivateVulnReporting {
 function Set-CodecovSecret {
     <#
     .SYNOPSIS
-        Add the CODECOV_TOKEN repo secret. No-op if it already exists (won't
-        overwrite).
+        Adds the CODECOV_TOKEN repo secret.
+        No-op if it already exists; it never overwrites.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo, [string]$Token)
     $secrets = gh secret list --repo $OwnerRepo 2>$null
@@ -727,9 +793,13 @@ function Set-CodecovSecret {
         Write-Warn 'CODECOV_TOKEN not provided - add it with gh secret set'
         return
     }
-    Invoke-Gh -What 'Setting the CODECOV_TOKEN secret' -Arguments @(
-        'secret', 'set', 'CODECOV_TOKEN',
-        '--repo', $OwnerRepo, '--body', $Token) | Out-Null
+    $ghArgs = @(
+        'secret', 'set', 'CODECOV_TOKEN'
+        '--repo', $OwnerRepo
+        '--body', $Token
+    )
+    Invoke-Gh -What 'Setting the CODECOV_TOKEN secret' `
+        -Arguments $ghArgs | Out-Null
     Add-Change
     Write-Ok "Added repo secret CODECOV_TOKEN"
 }
@@ -737,12 +807,12 @@ function Set-CodecovSecret {
 function Initialize-Topics {
     <#
     .SYNOPSIS
-        Seeds one throwaway topic so settings.yml can manage topics from then
-        on.
+        Seeds one throwaway topic, so settings.yml can manage topics after that.
     .DESCRIPTION
-        The Settings app's topics call does not land on a repo that has never
-        had a topic. The real list stays in settings.yml, which overwrites this
-        on the next sync.
+        The Settings app's topics call does not land on a repo
+        that has never had a topic.
+        The real list stays in settings.yml,
+        which overwrites this seed on the next sync.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
 
@@ -753,9 +823,12 @@ function Initialize-Topics {
         return
     }
 
-    Invoke-Gh -What 'Seeding a placeholder topic' -Arguments @(
-        'api', '--method', 'PUT', "repos/$OwnerRepo/topics",
-        '-f', 'names[]=github') | Out-Null
+    $ghArgs = @(
+        'api', '--method', 'PUT', "repos/$OwnerRepo/topics"
+        '-f', 'names[]=github'
+    )
+    Invoke-Gh -What 'Seeding a placeholder topic' `
+        -Arguments $ghArgs | Out-Null
     Add-Change
     Write-Ok "Seeded topic 'github'"
     Write-Detail 'settings.yml replaces this on the next sync'
@@ -764,18 +837,18 @@ function Initialize-Topics {
 function Enable-ImmutableReleases {
     <#
     .SYNOPSIS
-        Enables immutable releases, locking release assets and tags after
-        publication.
+        Enables immutable releases, locking assets and tags once published.
     .DESCRIPTION
-        Uses the dedicated /immutable-releases endpoints; the repo PATCH
-        endpoint has no field for it. Still in preview, so failure falls back to
-        the manual checklist.
+        Uses the dedicated /immutable-releases endpoints;
+        the repo PATCH endpoint has no field for it.
+        Still in preview, so a failure falls back to the manual checklist.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
 
-    # GET returns 204 when enabled and 404 when not, so the exit code is the
-    # answer.
-    gh api "repos/$OwnerRepo/immutable-releases" --silent 2>$null | Out-Null
+    # GET returns 204 when enabled and 404 when not,
+    # so the exit code is the answer.
+    $endpoint = "repos/$OwnerRepo/immutable-releases"
+    gh api $endpoint --silent 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         $global:LASTEXITCODE = 0
         Write-Skip 'Immutable releases already enabled'
@@ -783,8 +856,7 @@ function Enable-ImmutableReleases {
     }
     $global:LASTEXITCODE = 0
 
-    gh api --method PUT "repos/$OwnerRepo/immutable-releases" --silent `
-        2>$null | Out-Null
+    gh api --method PUT $endpoint --silent 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) {
         $global:LASTEXITCODE = 0
         Add-Change
@@ -794,10 +866,13 @@ function Enable-ImmutableReleases {
     $global:LASTEXITCODE = 0
     Write-Warn ("Couldn't enable immutable releases via the API " +
         '(still in preview) - added to the checklist')
+    $steps = @(
+        "https://github.com/$OwnerRepo/settings  →  General"
+        "check 'Enable release immutability'"
+    )
     Add-ManualItem -Category 'GitHub settings — web UI only (no API)' `
         -Title 'Enable release immutability' `
-        -Steps @("https://github.com/$OwnerRepo/settings  →  General",
-        "check 'Enable release immutability'")
+        -Steps $steps
 }
 
 # CodeQL languages this run should analyse. Layers add to it;
@@ -824,11 +899,11 @@ $script:CodeqlValidLanguages = @(
 function Add-CodeqlLanguage {
     <#
     .SYNOPSIS
-        Registers CodeQL languages for this layer, adding to whatever ancestors
-        asked for.
+        Registers CodeQL languages for this layer, adding to the inherited list.
     .PARAMETER Language
         One or more of: actions, c-cpp, csharp, go, java-kotlin,
-        javascript-typescript, python, ruby, swift. Anything else throws.
+        javascript-typescript, python, ruby, swift.
+        Anything else throws.
     #>
     param([Parameter(Mandatory)][string[]]$Language)
     foreach ($lang in $Language) {
@@ -844,20 +919,27 @@ function Add-CodeqlLanguage {
 }
 
 function Get-CodeqlLanguage {
-    <# The languages registered so far, for inspection or testing. #>
+    <#
+    .SYNOPSIS
+        Returns the languages registered so far, for inspection or testing.
+    #>
     return @($script:CodeqlLanguages | Sort-Object)
 }
 
 function Enable-Codeql {
     <#
-        Enable CodeQL default setup, analysing every language the chain
-        registered via Add-CodeqlLanguage. Call AFTER the first push -
-        the repo needs content.
+    .SYNOPSIS
+        Enables CodeQL default setup for every language the chain registered.
+    .DESCRIPTION
+        Languages come from Add-CodeqlLanguage.
+        Call this AFTER the first push - the repo needs content.
 
-        Unlike the other settings helpers this does NOT simply skip when already
-        configured: a layer may have added a language since, so it extends the
-        existing list instead. What is already configured is always kept, so a
-        language enabled by hand is never removed.
+        Unlike the other settings helpers,
+        this does NOT simply skip when already configured:
+        a layer may have added a language since,
+        so it extends the existing list instead.
+        What is already configured is always kept,
+        so a language enabled by hand is never removed.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
 
@@ -888,11 +970,14 @@ function Enable-Codeql {
     $global:LASTEXITCODE = 0
 
     if (-not $enabled) {
-        # GitHub 422s on a language the repo does not contain - expected for a
-        # template that declares csharp before it has any C#. Fall back to
-        # whatever is actually there.
-        & gh api --method PATCH $endpoint -f 'state=configured' --silent `
-            2>$null | Out-Null
+        # GitHub 422s on a language the repo does not contain -
+        # expected for a template that declares csharp before it has any C#.
+        # Fall back to whatever is actually there.
+        $retry = @(
+            'api', '--method', 'PATCH', $endpoint
+            '-f', 'state=configured'
+        )
+        & gh @retry --silent 2>$null | Out-Null
         $enabled = ($LASTEXITCODE -eq 0)
         $global:LASTEXITCODE = 0
         if ($enabled) {
@@ -900,15 +985,16 @@ function Enable-Codeql {
             $global:LASTEXITCODE = 0
             $missing = @($langs | Where-Object { $_ -notin $now })
             $nowList = ($now | Sort-Object) -join ', '
-            $changed = @($now | Where-Object { $_ -notin $existing }) -or
-                -not $existing
+            $fresh = @($now | Where-Object { $_ -notin $existing })
+            $changed = $fresh -or -not $existing
             if ($changed) {
                 Add-Change
                 Write-Ok "CodeQL default setup enabled: $nowList"
             }
             else {
-                # Nothing moved, so report a skip - this keeps the change count
-                # at zero for an already-scaffolded repo.
+                # Nothing moved, so report a skip -
+                # this keeps the change count at zero
+                # for an already-scaffolded repo.
                 Write-Skip "CodeQL already analysing: $nowList"
             }
             if ($missing) {
@@ -925,18 +1011,19 @@ function Enable-Codeql {
         Write-Ok "CodeQL default setup enabled: $($langs -join ', ')"
     }
     else {
-        # Code scanning may be unavailable on the repo entirely; hand it to the
-        # checklist rather than failing, and a later re-run will pick it up.
+        # Code scanning may be unavailable on the repo entirely.
+        # Hand it to the checklist rather than failing;
+        # a later re-run will pick it up.
         Write-Warn ('CodeQL default setup not enabled automatically - ' +
             'added to the checklist')
-        Add-ManualItem `
-            -Category 'GitHub settings — web UI only (no API)' `
-            -Title 'Set up CodeQL default analysis' `
-            -Steps @(
-            "https://github.com/$OwnerRepo/settings/security_analysis",
-            'Code scanning  →  Default  →  Enable',
+        $steps = @(
+            "https://github.com/$OwnerRepo/settings/security_analysis"
+            'Code scanning  →  Default  →  Enable'
             'Or just re-run this script once the repo is a few minutes old.'
         )
+        Add-ManualItem -Category 'GitHub settings — web UI only (no API)' `
+            -Title 'Set up CodeQL default analysis' `
+            -Steps $steps
     }
 }
 
@@ -946,10 +1033,13 @@ function Enable-Codeql {
 
 function Get-NewRepoUrl {
     <#
-        Build the git URL for a sibling repo by swapping the owner/repo path in
-        the source URL - preserving host/protocol (incl. custom SSH aliases like
-        git@github.com-personal:...) so the new repo's origin uses the same
-        creds.
+    .SYNOPSIS
+        Builds the git URL for a sibling repo,
+        by swapping the owner/repo path in the source URL.
+    .DESCRIPTION
+        Preserves the host and protocol,
+        including a custom SSH alias like git@github.com-personal:...,
+        so the new repo's origin uses the same credentials.
     #>
     param(
         [Parameter(Mandatory)][pscustomobject]$Context,
@@ -966,15 +1056,18 @@ function Get-NewRepoUrl {
 
 function Get-TemplateChain {
     <#
-        Walk the inheritance chain upward from $StartRepoPath by following each
-        repo's 'template' remote, and return the LOCAL paths of every layer,
-        nearest-first:
+    .SYNOPSIS
+        Walks the inheritance chain upward from $StartRepoPath,
+        following each repo's 'template' remote.
+    .DESCRIPTION
+        Returns the LOCAL paths of every layer, nearest first:
             [ .template-nuget, .template-dotnet, .github ]
 
-        Each ancestor is located by repo name as a sibling folder in $ParentDir.
-        Walking stops when a repo has no 'template' remote (the base) or when
-        the next ancestor isn't cloned locally. Cycles and runaway depth are
-        guarded.
+        Each ancestor is located by repo name,
+        as a sibling folder in $ParentDir.
+        Walking stops when a repo has no 'template' remote (the base),
+        or when the next ancestor isn't cloned locally.
+        Cycles and runaway depth are guarded.
     #>
     param(
         [Parameter(Mandatory)][string]$StartRepoPath,
@@ -1013,10 +1106,13 @@ function Get-TemplateChain {
 
 function Set-RemotesAndConfig {
     <#
-        Idempotently ensure the 'template' remote, push default, commit
-        template, and that 'main' exists & is checked out. Creates main from the
-        template branch ONLY if it doesn't already exist - so resuming never
-        resets existing history.
+    .SYNOPSIS
+        Ensures the 'template' remote, the push default, the commit template,
+        and that 'main' exists and is checked out.
+    .DESCRIPTION
+        Idempotent. Creates main from the template branch
+        ONLY if it doesn't already exist,
+        so resuming never resets existing history.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1038,11 +1134,10 @@ function Set-RemotesAndConfig {
 
     git -C $RepoPath show-ref --verify --quiet refs/heads/main
     if ($LASTEXITCODE -ne 0) {
-        Invoke-Git `
-            -What "Creating main from template/$($script:TemplateBranch)" `
+        $templateRef = "template/$($script:TemplateBranch)"
+        Invoke-Git -What "Creating main from $templateRef" `
             -RepoPath $RepoPath `
-            -Arguments @('checkout', '-B', 'main',
-                "template/$($script:TemplateBranch)") | Out-Null
+            -Arguments @('checkout', '-B', 'main', $templateRef) | Out-Null
     }
     else {
         $branch = git -C $RepoPath rev-parse --abbrev-ref HEAD 2>$null
@@ -1056,8 +1151,8 @@ function Set-RemotesAndConfig {
 function Initialize-Clone {
     <#
     .SYNOPSIS
-        Clone the new repo next to the template (or reuse an existing local
-        clone).
+        Clones the new repo next to the template,
+        or reuses an existing local clone.
     #>
     param(
         [Parameter(Mandatory)][string]$OriginUrl,
@@ -1086,12 +1181,14 @@ function Initialize-Clone {
 function Test-CommitExists {
     <#
     .SYNOPSIS
-        True if THIS repo already made a commit with this exact subject.
+        Returns true if THIS repo already made a commit with this exact subject.
     .DESCRIPTION
-        Scoped to template/<branch>..HEAD. Searching all history would match the
-        same commits inherited from an already-scaffolded parent and skip
-        customizing the new repo entirely. Returns false when the template ref
-        is missing, so the step re-runs harmlessly.
+        Scoped to template/<branch>..HEAD.
+        Searching all history would match the same commits
+        inherited from an already-scaffolded parent,
+        and skip customizing the new repo entirely.
+        Returns false when the template ref is missing,
+        so the step re-runs harmlessly.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1104,9 +1201,10 @@ function Test-CommitExists {
         return $false
     }
 
-    # Exact subject match, so one group's message can't satisfy another's gate
-    # by prefix. A reverted step still reads as done, since the original subject
-    # remains in the range.
+    # Exact subject match, so one group's message can't satisfy another's
+    # gate by prefix.
+    # A reverted step still reads as done,
+    # since the original subject remains in the range.
     $subjects = git -C $RepoPath log --format='%s' "$ref..HEAD" 2>$null
     return [bool](@($subjects) -ceq $Message)
 }
@@ -1118,8 +1216,8 @@ function Test-CommitExists {
 function Remove-TemplateOnlyFiles {
     <#
     .SYNOPSIS
-        Delete the files that live ONLY in the base .github repo (see
-        $TemplateOnlyFiles).
+        Deletes the files listed in $TemplateOnlyFiles,
+        which live ONLY in the base .github repo.
     #>
     param([Parameter(Mandatory)][string]$RepoPath)
     $gone = 0
@@ -1137,8 +1235,7 @@ function Remove-TemplateOnlyFiles {
 function Update-RepoReferences {
     <#
     .SYNOPSIS
-        Replace references to the source template's owner/repo with the new
-        repo's.
+        Replaces references to the source template's owner/repo with the new one's.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1146,20 +1243,22 @@ function Update-RepoReferences {
         [Parameter(Mandatory)][string]$NewOwnerRepo
     )
     $targets = [System.Collections.Generic.List[string]]::new()
-    'CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md' |
-        ForEach-Object { $targets.Add($_) }
+    $targets.AddRange(
+        [string[]]@('CONTRIBUTING.md', 'SECURITY.md', 'SUPPORT.md'))
     $issueDir = Join-Path $RepoPath '.github/ISSUE_TEMPLATE'
     if (Test-Path $issueDir) {
-        Get-ChildItem $issueDir -File | ForEach-Object {
-            $targets.Add(".github/ISSUE_TEMPLATE/$($_.Name)") }
+        $forms = Get-ChildItem $issueDir -File
+        foreach ($form in $forms) {
+            $targets.Add(".github/ISSUE_TEMPLATE/$($form.Name)")
+        }
     }
     foreach ($rel in $targets) {
         $f = Join-Path $RepoPath $rel
         if (Test-Path $f) {
             $raw = Get-Content -Raw $f
             if ($raw.Contains($OldOwnerRepo)) {
-                $raw.Replace($OldOwnerRepo, $NewOwnerRepo) | Set-Content `
-                    -NoNewline $f
+                $updated = $raw.Replace($OldOwnerRepo, $NewOwnerRepo)
+                Set-Content -Path $f -Value $updated -NoNewline
                 Write-Ok "Updated references in $rel"
             }
         }
@@ -1169,12 +1268,13 @@ function Update-RepoReferences {
 function Update-Readme {
     <#
     .SYNOPSIS
-        De-links the README rows for the template-only files, then prunes
-        orphaned link refs.
+        De-links the README rows for the template-only files,
+        then prunes the orphaned link definitions.
     .DESCRIPTION
-        De-links rather than deletes: the table's "Exists only in .github repo"
-        column is what documents that the file is deliberately absent here, so
-        the row must survive.
+        De-links rather than deletes:
+        the table's "Exists only in .github repo" column
+        is what documents that the file is deliberately absent here,
+        so the row must survive.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1221,12 +1321,12 @@ function Set-TemplateSyncConfig {
     .SYNOPSIS
         Points Template Sync at this repo's parent and enables the schedule.
     .DESCRIPTION
-        Retargeting matters: TEMPLATE_REPO_URL is inherited verbatim, so without
-        this a level-2 repo keeps syncing from its GRANDparent and never sees
-        its actual parent's changes.
+        Retargeting matters: TEMPLATE_REPO_URL is inherited verbatim,
+        so without this a level-2 repo keeps syncing from its GRANDparent,
+        and never sees its actual parent's changes.
     .PARAMETER TemplateOwnerRepo
-        The parent template as owner/repo; normalised to the https URL the
-        workflow needs.
+        The parent template as owner/repo,
+        normalised to the https URL the workflow needs.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1241,15 +1341,16 @@ function Set-TemplateSyncConfig {
     $raw = Get-Content -Raw $f
     $original = $raw
 
-    # Use [^\r\n] and [ \t], never '.' or \s: '.' matches CR and would convert
-    # CRLF to LF.
+    # Use [^\r\n] and [ \t], never '.' or \s:
+    # '.' matches CR and would convert CRLF to LF.
     $httpsUrl = "https://github.com/$TemplateOwnerRepo.git"
-    $raw = $raw -replace '(?m)^([ \t]*TEMPLATE_REPO_URL:[ \t]*)[^\r\n]*', `
-        "`${1}$httpsUrl"
+    $urlPattern = '(?m)^([ \t]*TEMPLATE_REPO_URL:[ \t]*)[^\r\n]*'
+    $raw = $raw -replace $urlPattern, "`${1}$httpsUrl"
 
-    # Match the SHAPE of the lines, never a specific cron: half-uncommenting the
-    # block yields a 'schedule:' with no entries, which GitHub rejects. No '$'
-    # anchor - CRLF defeats it.
+    # Match the SHAPE of the lines, never a specific cron:
+    # half-uncommenting the block yields a 'schedule:' with no entries,
+    # which GitHub rejects.
+    # No '$' anchor - CRLF defeats it.
     $raw = $raw -replace '(?m)^([ \t]*)#[ \t]*(schedule:)', '$1$2'
     $raw = $raw -replace '(?m)^([ \t]*)#[ \t]*(- cron:[^\r\n]*)', '$1  $2'
 
@@ -1269,7 +1370,10 @@ function Set-TemplateSyncConfig {
 }
 
 function Remove-ScriptsFolder {
-    <# Delete the scripts/ folder in a code repo (which aren't derived from). #>
+    <#
+    .SYNOPSIS
+        Deletes the scripts/ folder in a code repo, which isn't derived from.
+    #>
     param([Parameter(Mandatory)][string]$RepoPath)
     $dir = Join-Path $RepoPath 'scripts'
     if (Test-Path $dir) {
@@ -1280,10 +1384,13 @@ function Remove-ScriptsFolder {
 
 function Add-GitExclude {
     <#
-        Add a pattern to .git/info/exclude - a per-clone ignore list that is
-        never committed, so it can't leak into the template chain the way
-        .gitignore would. Idempotent. Uses LF: this is a git-internal control
-        file, and a stray CR would become part of the pattern.
+    .SYNOPSIS
+        Adds a pattern to .git/info/exclude, a per-clone ignore list.
+    .DESCRIPTION
+        .git/info/exclude is never committed,
+        so it can't leak into the template chain the way .gitignore would.
+        Idempotent. Uses LF: this is a git-internal control file,
+        and a stray CR would become part of the pattern.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1312,12 +1419,12 @@ function Add-GitExclude {
 function Write-SettingsFile {
     <#
     .SYNOPSIS
-        Writes the minimal _extends settings.yml; Kind=Code also sets
-        is_template: false.
+        Writes the minimal _extends settings.yml.
+        Kind=Code also sets is_template: false.
     .DESCRIPTION
-        Skipped only when the file already names THIS repo. Testing for
-        '_extends:' alone would wrongly preserve the parent's inherited
-        settings.yml.
+        Skipped only when the file already names THIS repo.
+        Testing for '_extends:' alone would wrongly preserve
+        the parent's inherited settings.yml.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1338,7 +1445,7 @@ function Write-SettingsFile {
     }
     $sep = '  #' + ('─' * 77)
     $repoPluginDoc = '  # https://github.com/repository-settings/app' +
-        '/blob/master/docs/plugins/repository.md'
+    '/blob/master/docs/plugins/repository.md'
     $lines = [System.Collections.Generic.List[string]]::new()
     @(
         '# Inherit everything from the immediate parent template and override'
@@ -1400,8 +1507,8 @@ function Write-SettingsFile {
     if (-not (Test-Path $settingsDir)) {
         New-Item -ItemType Directory -Force $settingsDir | Out-Null
     }
-    ($lines -join "`r`n") + "`r`n" | Set-Content -NoNewline `
-        -Encoding utf8 $settingsPath
+    $content = ($lines -join "`r`n") + "`r`n"
+    Set-Content -Path $settingsPath -Value $content -NoNewline -Encoding utf8
     Write-Ok "Wrote .github/settings.yml ($Kind)"
 }
 
@@ -1412,19 +1519,21 @@ function Write-SettingsFile {
 function Write-WorkspaceFile {
     <#
     .SYNOPSIS
-        Writes a multi-root <repo>.code-workspace spanning the new repo and its
-        template chain.
+        Writes a multi-root <repo>.code-workspace,
+        spanning the new repo and its template chain.
     .DESCRIPTION
-        Paths resolve against this file's own folder, so the new repo is "." and
-        its ancestors are "../<name>", forward slashes only. The new repo is
-        listed first because tooling that is not multi-root aware only sees
-        folders[0]. dotnet.defaultSolution is window-scoped, so it must live in
-        the workspace 'settings' block - it is ignored per-folder.
+        Paths resolve against this file's own folder,
+        so the new repo is "." and its ancestors are "../<name>",
+        forward slashes only.
+        The new repo is listed first,
+        because tooling that is not multi-root aware only sees folders[0].
+        dotnet.defaultSolution is window-scoped,
+        so it must live in the workspace 'settings' block;
+        it is ignored per-folder.
     .PARAMETER ChainPaths
         Ancestor template paths, nearest first.
     .PARAMETER Force
-        Overwrite an existing workspace file instead of leaving your edits
-        alone.
+        Overwrites an existing workspace file, instead of leaving edits alone.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1451,22 +1560,25 @@ function Write-WorkspaceFile {
         foreach ($p in $ChainPaths) {
             $name = Split-Path -Leaf $p
             $full = (Resolve-Path $p).Path
-            $rel = [System.IO.Path]::GetRelativePath($repoFull, $full) `
-                -replace '\\', '/'
+            $rel = [System.IO.Path]::GetRelativePath($repoFull, $full)
+            $rel = $rel -replace '\\', '/'
             $folders.Add("`t`t{ `"name`": `"$name`", `"path`": `"$rel`" },")
         }
     }
 
-    # Pin the primary repo's solution, or C# Dev Kit adopts a template layer's
-    # placeholder one - or prompts on every open when it finds several.
-    $slns = @(
-        Get-ChildItem -LiteralPath $repoFull -Include *.sln, *.slnx, *.slnf `
-            -File -Recurse -Depth 3 -ErrorAction SilentlyContinue |
-            Where-Object {
-                $_.FullName -notmatch '[\\/](bin|obj|node_modules|\.git)[\\/]'
-            } |
-            Sort-Object FullName
-    )
+    # Pin the primary repo's solution,
+    # or C# Dev Kit adopts a template layer's placeholder one -
+    # or prompts on every open when it finds several.
+    $slns = Get-ChildItem -LiteralPath $repoFull `
+        -Include *.sln, *.slnx, *.slnf `
+        -File `
+        -Recurse `
+        -Depth 3 `
+        -ErrorAction SilentlyContinue
+    $slns = $slns | Where-Object {
+        $_.FullName -notmatch '[\\/](bin|obj|node_modules|\.git)[\\/]'
+    }
+    $slns = @($slns | Sort-Object FullName)
     $settings = [System.Collections.Generic.List[string]]::new()
     if ($slns.Count -gt 0) {
         $sln = $slns[0].FullName.Substring($repoFull.Length)
@@ -1508,8 +1620,8 @@ function Write-WorkspaceFile {
         '}'
     ) | ForEach-Object { $lines.Add($_) }
 
-    ($lines -join "`r`n") + "`r`n" | Set-Content -NoNewline `
-        -Encoding utf8 $wsPath
+    $content = ($lines -join "`r`n") + "`r`n"
+    Set-Content -Path $wsPath -Value $content -NoNewline -Encoding utf8
     Add-Change
     Write-Ok "Wrote $RepoName.code-workspace ($(1 + $ChainPaths.Count) folders)"
     return $wsPath
@@ -1517,14 +1629,17 @@ function Write-WorkspaceFile {
 
 function Start-VSCode {
     <#
-        Open a path (folder or .code-workspace) in VS Code as a separate,
-        detached process.
+    .SYNOPSIS
+        Opens a path in VS Code as a separate, detached process.
+    .DESCRIPTION
+        The path can be a folder or a .code-workspace.
 
-        Prefers Code.exe over the code.cmd shim: launching the .cmd through
-        Start-Process flashes a console window, while the exe returns
-        immediately and cleanly. Falls back to the shim, then to Insiders. Never
-        throws - failing to open an editor should not fail a successful
-        scaffold.
+        Prefers Code.exe over the code.cmd shim:
+        launching the .cmd through Start-Process flashes a console window,
+        while the exe returns immediately and cleanly.
+        Falls back to the shim, then to Insiders.
+        Never throws - failing to open an editor
+        should not fail a successful scaffold.
     #>
     param(
         [Parameter(Mandatory)][string]$Target,
@@ -1532,8 +1647,8 @@ function Start-VSCode {
     )
     $exe = $null
 
-    # Derive Code.exe from the shim on PATH: <root>\bin\code.cmd ->
-    # <root>\Code.exe
+    # Derive Code.exe from the shim on PATH:
+    # <root>\bin\code.cmd -> <root>\Code.exe
     foreach ($cliName in 'code', 'code-insiders') {
         $cli = Get-Command $cliName -ErrorAction SilentlyContinue
         if (-not $cli) { continue }
@@ -1581,18 +1696,19 @@ function Start-VSCode {
 function Invoke-GatedCommit {
     <#
     .SYNOPSIS
-        Runs a group of related changes and commits them, unless that commit
-        already exists.
+        Runs a group of related changes and commits them,
+        unless that commit already exists.
     .DESCRIPTION
-        $Message is both the commit subject and the idempotency key, so
-        rewording one silently makes an already-scaffolded repo look
-        unscaffolded.
+        $Message is both the commit subject and the idempotency key,
+        so rewording one silently makes an already-scaffolded repo
+        look unscaffolded.
     .PARAMETER Paths
-        Pathspec to stage. Omit to stage exactly what -Body changed, which is
-        what you want for anything repo-wide. Either way your own uncommitted
-        work is excluded.
+        Pathspec to stage.
+        Omit it to stage exactly what -Body changed,
+        which is what you want for anything repo-wide.
+        Either way your own uncommitted work is excluded.
     .PARAMETER Body
-        Scriptblock; still sees the calling script's variables.
+        Scriptblock; it still sees the calling script's variables.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
@@ -1612,23 +1728,25 @@ function Invoke-GatedCommit {
         return
     }
 
-    # No -Paths: stage exactly what the body touched. A hand-maintained list
-    # would silently omit files a repo-wide rename moved.
+    # No -Paths: stage exactly what the body touched.
+    # A hand-maintained list would silently omit files
+    # that a repo-wide rename moved.
     $before = @(Get-DirtyPath -RepoPath $RepoPath)
     & $Body
-    $touched = @(Get-DirtyPath -RepoPath $RepoPath |
-            Where-Object { $_ -notin $before })
+    $after = @(Get-DirtyPath -RepoPath $RepoPath)
+    $touched = @($after | Where-Object { $_ -notin $before })
     if (-not $touched) { Write-Skip "Nothing changed for: $Message"; return }
     Invoke-StagedCommit -RepoPath $RepoPath -Message $Message -Paths $touched
 }
 
 function Get-DirtyPath {
     <#
-        Paths git currently reports as changed, one per entry.
-
-        A rename shows up as 'R old -> new'; BOTH sides are returned, because
-        staging only the new path would leave the deletion of the old one out of
-        the commit.
+    .SYNOPSIS
+        Returns the paths git currently reports as changed, one per entry.
+    .DESCRIPTION
+        A rename shows up as 'R old -> new'; BOTH sides are returned,
+        because staging only the new path would leave the deletion
+        of the old one out of the commit.
     #>
     param([Parameter(Mandatory)][string]$RepoPath)
     $lines = @(git -C $RepoPath status --porcelain 2>$null)
@@ -1648,12 +1766,12 @@ function Get-DirtyPath {
 function Invoke-LayerModule {
     <#
     .SYNOPSIS
-        Runs each layer module's entry point, base layer first. No-op if the
-        chain has none.
+        Runs each layer module's entry point, base layer first.
+        No-op if the chain has none.
     .DESCRIPTION
-        Layers commit their own work via Invoke-GatedCommit; this only
-        warns if one leaves changes uncommitted, since every later step stages
-        an explicit pathspec.
+        Layers commit their own work via Invoke-GatedCommit.
+        This only warns if one leaves changes uncommitted,
+        since every later step stages an explicit pathspec.
     .PARAMETER Context
         RepoPath, RepoName, Kind, OwnerRepo, SourceOwnerRepo.
     #>
@@ -1667,9 +1785,9 @@ function Invoke-LayerModule {
             'nothing template-specific to apply')
         return
     }
-    # Snapshot first so the check below reports only what the LAYERS dirtied -
-    # the developer's own uncommitted work was already there and is none of our
-    # business.
+    # Snapshot first, so the check below reports only what the LAYERS dirtied.
+    # The developer's own uncommitted work was already there,
+    # and is none of our business.
     $status = {
         @(git -C $RepoPath status --porcelain 2>$null)
         $global:LASTEXITCODE = 0
@@ -1681,9 +1799,10 @@ function Invoke-LayerModule {
         & $layer.Entry -Context $Context
     }
 
-    # A layer that changed files but committed nothing would leave them
-    # uncommitted forever: every later step stages an explicit pathspec, so
-    # nothing else picks them up.
+    # A layer that changed files but committed nothing
+    # would leave them uncommitted forever:
+    # every later step stages an explicit pathspec,
+    # so nothing else picks them up.
     $left = @((& $status) | Where-Object { $_ -notin $before })
     if ($left) {
         Write-Warn "$($left.Count) file(s) changed by a layer, uncommitted"
@@ -1695,11 +1814,11 @@ function Invoke-LayerModule {
 function Rename-Token {
     <#
     .SYNOPSIS
-        Replaces a placeholder token in file content, file names and directory
-        names.
+        Replaces a placeholder token in file content, file names,
+        and directory names.
     .DESCRIPTION
-        Deepest paths first, so renaming a parent cannot invalidate its
-        children's paths.
+        Deepest paths first,
+        so renaming a parent cannot invalidate its children's paths.
     .PARAMETER SkipExtension
         Binary-ish extensions to leave alone.
     .PARAMETER Exclude
@@ -1722,9 +1841,11 @@ function Rename-Token {
 
     $escaped = ($Exclude | ForEach-Object { [regex]::Escape($_) }) -join '|'
     $skipRx = "[\\/]($escaped)[\\/]"
-    $all = @(Get-ChildItem -LiteralPath $RepoPath -Recurse -Force `
-        -ErrorAction SilentlyContinue |
-            Where-Object { $_.FullName -notmatch $skipRx })
+    $all = Get-ChildItem -LiteralPath $RepoPath `
+        -Recurse `
+        -Force `
+        -ErrorAction SilentlyContinue
+    $all = @($all | Where-Object { $_.FullName -notmatch $skipRx })
 
     # 1) content
     $edited = 0
@@ -1735,8 +1856,8 @@ function Rename-Token {
         $raw = Get-Content -LiteralPath $f.FullName -Raw `
             -ErrorAction SilentlyContinue
         if ($null -ne $raw -and $raw.Contains($From)) {
-            $raw.Replace($From, $To) | Set-Content -LiteralPath $f.FullName `
-                -NoNewline
+            $updated = $raw.Replace($From, $To)
+            Set-Content -LiteralPath $f.FullName -Value $updated -NoNewline
             $edited++
         }
     }
@@ -1744,8 +1865,8 @@ function Rename-Token {
     # 2) names, deepest first
     $renamed = 0
     $depth = { $_.FullName.Split([char]'\').Count }
-    $named = @($all | Where-Object { $_.Name.Contains($From) } |
-            Sort-Object $depth -Descending)
+    $named = $all | Where-Object { $_.Name.Contains($From) }
+    $named = @($named | Sort-Object $depth -Descending)
     foreach ($item in $named) {
         # Skip anything a parent rename already moved.
         if (-not (Test-Path -LiteralPath $item.FullName)) { continue }
@@ -1764,24 +1885,28 @@ function Rename-Token {
 
 function Invoke-StagedCommit {
     <#
-        Stage the paths this group owns and commit, but only if something is
-        actually staged.
-
-        -Paths is a deliberate safety boundary. Staging everything ('git add
-        -A') is unsafe on a re-run: if a group legitimately produces no diff
-        (because the parent template already did that work), no commit is made,
-        so its gate stays false and the group runs again on every future run -
-        sweeping a developer's unrelated uncommitted work into a 'chore:'
-        commit. Scoping the pathspec makes an ungated no-diff group harmless.
+    .SYNOPSIS
+        Stages the paths this group owns and commits,
+        but only if something is actually staged.
+    .DESCRIPTION
+        -Paths is a deliberate safety boundary.
+        Staging everything ('git add -A') is unsafe on a re-run:
+        if a group legitimately produces no diff,
+        because the parent template already did that work,
+        then no commit is made, its gate stays false,
+        and the group runs again on every future run -
+        sweeping a developer's unrelated uncommitted work
+        into a 'chore:' commit.
+        Scoping the pathspec makes an ungated no-diff group harmless.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
         [Parameter(Mandatory)][string]$Message,
         [string[]]$Paths = @('.')
     )
-    # 'git add -- <path>' is a hard error when the path is neither on disk nor
-    # tracked, so drop those first (e.g. scripts/ in a template repo, which is
-    # untouched).
+    # 'git add -- <path>' is a hard error
+    # when the path is neither on disk nor tracked, so drop those first -
+    # e.g. scripts/ in a template repo, which is untouched.
     $spec = @($Paths | Where-Object {
             if (Test-Path (Join-Path $RepoPath $_)) { return $true }
             git -C $RepoPath ls-files --error-unmatch -- $_ 2>&1 | Out-Null
@@ -1795,8 +1920,8 @@ function Invoke-StagedCommit {
         -Arguments (@('add', '-A', '--') + $spec) | Out-Null
     git -C $RepoPath diff --cached --quiet
     if ($LASTEXITCODE -ne 0) {
-        # Summarise what is going in BEFORE committing, so the log shows the
-        # grouping.
+        # Summarise what is going in BEFORE committing,
+        # so the log shows the grouping.
         $staged = @(git -C $RepoPath diff --cached --name-status 2>$null)
         Invoke-Git -What "Committing '$Message'" -RepoPath $RepoPath `
             -Arguments @('commit', '-m', $Message) | Out-Null
@@ -1815,7 +1940,10 @@ function Invoke-StagedCommit {
 }
 
 function Push-Repo {
-    <# Push main. Idempotent: 'Everything up-to-date' when nothing changed. #>
+    <#
+    .SYNOPSIS
+        Pushes main. Idempotent: 'Everything up-to-date' when nothing changed.
+    #>
     param([Parameter(Mandatory)][string]$RepoPath)
     $out = Invoke-Git -What 'Pushing main' -RepoPath $RepoPath `
         -Arguments @('push', '-u', 'origin', 'main')
@@ -1831,12 +1959,16 @@ function Push-Repo {
 function Start-TemplateSync {
     <#
     .SYNOPSIS
-        Dispatch the Template Sync workflow to verify it works & initialize its
-        baseline.
+        Dispatches the Template Sync workflow,
+        to verify it works and initialize its baseline.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
-    & gh workflow run template-sync.yml --repo $OwnerRepo --ref main `
-        2>&1 | Out-Null
+    $ghArgs = @(
+        'workflow', 'run', 'template-sync.yml'
+        '--repo', $OwnerRepo
+        '--ref', 'main'
+    )
+    & gh @ghArgs 2>&1 | Out-Null
     if ($LASTEXITCODE -eq 0) {
         Add-Change
         Write-Ok 'Dispatched Template Sync'
