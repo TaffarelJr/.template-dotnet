@@ -1,20 +1,17 @@
 #Requires -Version 7.0
 <#
-    Shared helpers for New-Repo.ps1,
-    which creates a new repo derived from the template repo it is run from.
+    Shared helpers for creating a new repo derived from a template repo.
     See scripts/README.md for the design.
 
-    Keep this file identical at every layer: it is inherited by merge,
-    so a per-layer edit conflicts on every future template change.
-    Layer-specific behaviour goes in an additive Helpers-<NN>-<slug>.psm1.
+    Inherited by merge, so keep it identical at every layer:
+    a per-layer edit conflicts on every future template change.
 #>
 
 Set-StrictMode -Version Latest
 
-# Module scope has its own preference,
-# so the calling script's 'Stop' does not reach these functions.
-# Without this, a failing cmdlet would be reported as a success
-# by the Write-Ok on the next line.
+# Module scope has its own preference, so the calling script's 'Stop' never
+# reaches these functions. Without this, a failing cmdlet is non-terminating
+# and the Write-Ok on the next line reports a success that never happened.
 $ErrorActionPreference = 'Stop'
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -23,6 +20,15 @@ $ErrorActionPreference = 'Stop'
 
 $script:RepoOwner = 'TaffarelJr'
 $script:TemplateBranch = 'main'
+
+# Files that exist ONLY in the base .github repo.
+# Single source of truth: the same table drives both the deletion
+# and the README de-linking, so the two can't drift apart.
+# 'Label' is the markdown link-reference label the README uses for it.
+$script:TemplateOnlyFiles = @(
+    @{ Path = '.github/FUNDING.yml'; Label = 'fundingFile' }
+    @{ Path = '.github/ISSUE_TEMPLATE/config.yml'; Label = 'issueChooserFile' }
+)
 
 function Get-RepoOwner {
     <#
@@ -42,100 +48,18 @@ function Get-TemplateBranch {
 }
 
 #───────────────────────────────────────────────────────────────────────────────
-# Per-layer customization
+# Console output
 #───────────────────────────────────────────────────────────────────────────────
 
-function Get-LayerModule {
-    <#
-    .SYNOPSIS
-        Finds this chain's Helpers-<NN>-<slug>.psm1 layer modules, in load order.
-    .DESCRIPTION
-        <NN> is the layer tier, since alphabetical order does not match ancestry.
-        The extension is checked explicitly
-        because a Windows -Filter of '*.psm1' matches loosely.
-    #>
-    $files = Get-ChildItem -Path $PSScriptRoot `
-        -Filter 'Helpers-*' `
-        -File `
-        -ErrorAction SilentlyContinue
-    $files = $files | Where-Object { $_.Extension -eq '.psm1' }
-    return @($files | Sort-Object Name)
-}
-
-function Import-LayerModule {
-    <#
-    .SYNOPSIS
-        Loads every layer module and returns its module/entry-point pairs in order.
-    .DESCRIPTION
-        Imported -Global, so each layer's exported helpers are visible
-        to the layers below it.
-        The entry point is found from the module's own ExportedFunctions
-        by the Invoke-*Scaffold pattern, so it is never coupled to the filename.
-    #>
-    $loaded = [System.Collections.Generic.List[object]]::new()
-    foreach ($file in Get-LayerModule) {
-        $mod = Import-Module $file.FullName -Force -Global -PassThru
-        $pattern = 'Invoke-*Scaffold'
-        $exported = $mod.ExportedFunctions.Values
-        $entry = @($exported | Where-Object { $_.Name -like $pattern })
-        if ($entry.Count -ne 1) {
-            $found = if ($entry) { ": $($entry.Name -join ', ')" }
-            throw ("$($file.Name) must export exactly one " +
-                "Invoke-*Scaffold entry point, " +
-                "but exports $($entry.Count)$found.")
-        }
-        $loaded.Add([pscustomobject]@{
-                Name   = $file.Name
-                Module = $mod
-                Entry  = $entry[0]
-            })
-    }
-    return $loaded.ToArray()
-}
-
-function Remove-LayerModule {
-    <#
-    .SYNOPSIS
-        Unloads the layer modules so an interactive session isn't left holding them.
-    #>
-    foreach ($file in Get-LayerModule) {
-        $name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
-        Remove-Module $name -Force -ErrorAction SilentlyContinue
-    }
-}
-
-# Files that exist ONLY in the base .github repo.
-# Single source of truth: the same table drives both the deletion
-# and the README de-linking, so the two can't drift apart.
-# 'Label' is the markdown link-reference label the README uses for that file.
-$script:TemplateOnlyFiles = @(
-    @{ Path = '.github/FUNDING.yml'; Label = 'fundingFile' }
-    @{ Path = '.github/ISSUE_TEMPLATE/config.yml'; Label = 'issueChooserFile' }
-)
-
-#───────────────────────────────────────────────────────────────────────────────
-# Internal state & logging
-#───────────────────────────────────────────────────────────────────────────────
-
-$script:SkipManualPrompts = $false
-$script:CurrentStep = ''
-$script:CurrentStepTitle = ''
-
-# Pushed by Use-GhAccount, popped by Reset-GhAccount.
-$script:GhStatePushed = $false
-$script:PriorGhToken = $null
-$script:PriorGhAccount = $null
-$script:ManualItems = [System.Collections.Generic.List[object]]::new()
-
-# Display tallies for the end-of-run summary.
+# Tallies for the end-of-run summary, owned by the Write-* functions
+# that increment them.
 $script:OkCount = 0
 $script:SkipCount = 0
 $script:WarnCount = 0
 
-# Not a tally: did this run change anything?
-# Gates the Template Sync dispatch and the "already fully scaffolded" message,
-# so a successful no-op must not count.
-$script:ChangeCount = 0
+# Set by Write-Step, so a failure banner can name where things went wrong.
+$script:CurrentStep = ''
+$script:CurrentStepTitle = ''
 
 $script:Rule = '─' * 72
 
@@ -175,9 +99,6 @@ function Write-Detail {
     Write-Host "       $Msg" -ForegroundColor DarkGray
 }
 
-# Flags that this run changed real state; see $script:ChangeCount.
-function Add-Change { $script:ChangeCount++ }
-
 # Aligned label/value pair, for the run header in step 0.
 function Write-Field {
     # An empty -Label is allowed:
@@ -186,52 +107,8 @@ function Write-Field {
         [Parameter(Mandatory)][AllowEmptyString()][string]$Label,
         [string]$Value
     )
+
     Write-Host ("  ·  {0,-18}{1}" -f $Label, $Value) -ForegroundColor Gray
-}
-
-function Assert-LastExit {
-    <#
-    .SYNOPSIS
-        Throws if the last native command exited non-zero.
-    #>
-    param([Parameter(Mandatory)][string]$What)
-    if ($LASTEXITCODE -ne 0) { throw "$What failed (exit code $LASTEXITCODE)" }
-}
-
-function Format-Slug {
-    <#
-    .SYNOPSIS
-        Normalises and validates a repo-name slug:
-        one regex and one error wording for the whole chain.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$Value,
-        [Parameter(Mandatory)][string]$Label
-    )
-    $slug = $Value.Trim().ToLowerInvariant()
-    if ($slug -notmatch '^[a-z0-9]+(-[a-z0-9]+)*$') {
-        throw "$Label must be kebab-case (letters/digits/hyphens): '$slug'"
-    }
-    return $slug
-}
-
-function Confirm-Proceed {
-    <#
-    .SYNOPSIS
-        Returns $true when the run should continue - the final go/no-go gate.
-    .DESCRIPTION
-        Honours the module's own skip-prompts state,
-        rather than a second copy of the switch in each script,
-        and reports an abort through Write-Warn,
-        so it looks like every other warning.
-    #>
-    param([Parameter(Mandatory)][string]$OwnerRepo)
-    if ($script:SkipManualPrompts) { return $true }
-    if ((Read-Host "  Type 'yes' to create/verify $OwnerRepo") -eq 'yes') {
-        return $true
-    }
-    Write-Warn 'Aborted by user.'
-    return $false
 }
 
 function Write-Step {
@@ -250,9 +127,6 @@ function Write-Step {
     $pad = '═' * [Math]::Max(0, 72 - $head.Length)
     Write-Host ($head + $pad) -ForegroundColor Cyan
 }
-
-# Reports whether this run changed anything; see Add-Change.
-function Get-ChangeCount { return $script:ChangeCount }
 
 function Show-Summary {
     <#
@@ -308,6 +182,51 @@ function Show-Failure {
     Write-Host ""
 }
 
+#───────────────────────────────────────────────────────────────────────────────
+# Run state
+#───────────────────────────────────────────────────────────────────────────────
+
+# Suppresses every prompt, for an unattended run.
+$script:SkipManualPrompts = $false
+
+# Not a tally: did this run change anything?
+# Gates the Template Sync dispatch and the "already fully scaffolded"
+# message, so a successful no-op must not count.
+$script:ChangeCount = 0
+
+function Set-SkipPrompt {
+    <#
+    .SYNOPSIS
+        Suppresses every prompt, for an unattended run.
+    #>
+    param([Parameter(Mandatory)][bool]$Skip)
+    $script:SkipManualPrompts = $Skip
+}
+
+# Flags that this run changed real state; see $script:ChangeCount.
+function Add-Change {
+    $script:ChangeCount++
+}
+
+# Reports whether this run changed anything; see Add-Change.
+function Get-ChangeCount { return $script:ChangeCount }
+
+#───────────────────────────────────────────────────────────────────────────────
+# Process wrappers
+#───────────────────────────────────────────────────────────────────────────────
+
+function Assert-LastExit {
+    <#
+    .SYNOPSIS
+        Throws if the last native command exited non-zero.
+    #>
+    param([Parameter(Mandatory)][string]$What)
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "$What failed (exit code $LASTEXITCODE)"
+    }
+}
+
 function Invoke-Git {
     <#
     .SYNOPSIS
@@ -359,18 +278,28 @@ function Invoke-Gh {
     return $out
 }
 
-function Set-SkipPrompts {
-    <#
-    .SYNOPSIS
-        Suppresses every prompt, for an unattended run.
-    #>
-    param([Parameter(Mandatory)][bool]$Skip)
-    $script:SkipManualPrompts = $Skip
-}
-
 #───────────────────────────────────────────────────────────────────────────────
 # Input resolution (command line OR prompt)
 #───────────────────────────────────────────────────────────────────────────────
+
+function Format-Slug {
+    <#
+    .SYNOPSIS
+        Normalises and validates a repo-name slug:
+        one regex and one error wording for the whole chain.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Value,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $slug = $Value.Trim().ToLowerInvariant()
+    if ($slug -notmatch '^[a-z0-9]+(-[a-z0-9]+)*$') {
+        throw "$Label must be kebab-case (letters/digits/hyphens): '$slug'"
+    }
+
+    return $slug
+}
 
 function Resolve-Input {
     <#
@@ -381,7 +310,7 @@ function Resolve-Input {
           (tracked in $Bound = $PSBoundParameters),
           uses $Value as-is and does NOT prompt,
           even if it is an empty string.
-        - Otherwise, if prompts are suppressed (Set-SkipPrompts $true),
+        - Otherwise, if prompts are suppressed (Set-SkipPrompt $true),
           returns $Default without prompting, so unattended runs never block.
         - Otherwise prompts. A non-empty -Default is shown as [default],
           and ENTER accepts it. -Secret prompts without echo, for tokens.
@@ -407,9 +336,30 @@ function Resolve-Input {
     return $entered
 }
 
+function Confirm-Proceed {
+    <#
+    .SYNOPSIS
+        Returns $true when the run should continue - the final go/no-go gate.
+    .DESCRIPTION
+        Honours the module's own skip-prompts state,
+        rather than a second copy of the switch in each script,
+        and reports an abort through Write-Warn,
+        so it looks like every other warning.
+    #>
+    param([Parameter(Mandatory)][string]$OwnerRepo)
+    if ($script:SkipManualPrompts) { return $true }
+    if ((Read-Host "  Type 'yes' to create/verify $OwnerRepo") -eq 'yes') {
+        return $true
+    }
+    Write-Warn 'Aborted by user.'
+    return $false
+}
+
 #───────────────────────────────────────────────────────────────────────────────
 # Manual follow-up checklist (things with no API)
 #───────────────────────────────────────────────────────────────────────────────
+
+$script:ManualItems = [System.Collections.Generic.List[object]]::new()
 
 function Add-ManualItem {
     <#
@@ -428,14 +378,14 @@ function Add-ManualItem {
         })
 }
 
-function Register-ManualSettings {
+function Register-ManualSetting {
     <#
     .SYNOPSIS
         Queues the repo settings GitHub only exposes in the web UI (no REST API).
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
     # NB: release immutability is NOT listed here - it has a real API now,
-    # handled by Enable-ImmutableReleases, which re-adds it to this
+    # handled by Enable-ReleaseImmutability, which re-adds it to this
     # list only if the call fails.
     $cat = 'GitHub settings — web UI only (no API)'
     $url = "https://github.com/$OwnerRepo/settings"
@@ -515,6 +465,140 @@ function Show-ManualChecklist {
 }
 
 #───────────────────────────────────────────────────────────────────────────────
+# Layer modules
+#───────────────────────────────────────────────────────────────────────────────
+
+# The one filename this module must never load: its own.
+$script:CoreModuleName = Split-Path -Leaf $PSCommandPath
+
+function Get-LayerModule {
+    <#
+    .SYNOPSIS
+        Finds every layer module alongside this one, in load order.
+    .DESCRIPTION
+        Any *.psm1 in this folder is a layer module, except this file.
+        A layer adds one by dropping it in - nothing inherited gets edited.
+
+        Sorted by filename, which is why the convention carries a tier
+        number: Helpers-<NN>-<slug>.psm1. Import order is not what matters
+        (every module is -Global, and calls happen later); the tier fixes
+        the order their entry points RUN in, so a parent's scaffolding
+        finishes before a child's starts.
+
+        The extension is checked explicitly
+        because a Windows -Filter of '*.psm1' matches loosely.
+    #>
+    $files = Get-ChildItem -Path $PSScriptRoot `
+        -Filter '*.psm1' `
+        -File `
+        -ErrorAction SilentlyContinue
+    $files = $files | Where-Object {
+        $_.Extension -eq '.psm1' -and $_.Name -ne $script:CoreModuleName
+    }
+    return @($files | Sort-Object Name)
+}
+
+function Import-LayerModule {
+    <#
+    .SYNOPSIS
+        Loads every layer module and returns those that contribute an entry point.
+    .DESCRIPTION
+        Imported -Global, so each layer's exported helpers are visible
+        to the layers below it.
+
+        An entry point is found from the module's own ExportedFunctions by the
+        Invoke-*Scaffold pattern, so it is never coupled to the filename.
+        A module may export none - a layer is free to contribute helpers only -
+        but two or more is ambiguous and throws.
+    #>
+    $pattern = 'Invoke-*Scaffold'
+    $loaded = [System.Collections.Generic.List[object]]::new()
+    foreach ($file in Get-LayerModule) {
+        $mod = Import-Module $file.FullName -Force -Global -PassThru
+
+        $entry = @($mod.ExportedFunctions.Values |
+            Where-Object { $_.Name -like $pattern })
+
+        if ($entry.Count -gt 1) {
+            throw ("$($file.Name) exports $($entry.Count) $pattern " +
+                "entry points, so the order is ambiguous: " +
+                "$($entry.Name -join ', ').")
+        }
+        if ($entry.Count -eq 0) {
+            Write-Info "$($file.Name) - helpers only, no entry point"
+            continue
+        }
+
+        $loaded.Add([pscustomobject]@{
+                Name   = $file.Name
+                Module = $mod
+                Entry  = $entry[0]
+            })
+    }
+
+    return $loaded.ToArray()
+}
+
+function Remove-LayerModule {
+    <#
+    .SYNOPSIS
+        Unloads the layer modules so an interactive session isn't left holding them.
+    #>
+    foreach ($file in Get-LayerModule) {
+        $name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+        Remove-Module $name -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Invoke-LayerModule {
+    <#
+    .SYNOPSIS
+        Runs each layer module's entry point, base layer first.
+        No-op if the chain has none.
+    .DESCRIPTION
+        Layers commit their own work via Invoke-GatedCommit.
+        This only warns if one leaves changes uncommitted,
+        since every later step stages an explicit pathspec.
+    .PARAMETER Context
+        RepoPath, RepoName, Kind, OwnerRepo, SourceOwnerRepo.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepoPath,
+        [Parameter(Mandatory)][hashtable]$Context
+    )
+    $layers = Import-LayerModule
+    if (-not $layers) {
+        Write-Skip ('No Helpers-*.psm1 layers in this chain - ' +
+            'nothing template-specific to apply')
+        return
+    }
+    # Snapshot first, so the check below reports only what the LAYERS dirtied.
+    # The developer's own uncommitted work was already there,
+    # and is none of our business.
+    $status = {
+        @(git -C $RepoPath status --porcelain 2>$null)
+        $global:LASTEXITCODE = 0
+    }
+    $before = @(& $status)
+
+    foreach ($layer in $layers) {
+        Write-Info "$($layer.Name) -> $($layer.Entry.Name)"
+        & $layer.Entry -Context $Context
+    }
+
+    # A layer that changed files but committed nothing
+    # would leave them uncommitted forever:
+    # every later step stages an explicit pathspec,
+    # so nothing else picks them up.
+    $left = @((& $status) | Where-Object { $_ -notin $before })
+    if ($left) {
+        Write-Warn "$($left.Count) file(s) changed by a layer, uncommitted"
+        foreach ($l in $left) { Write-Detail $l.Trim() }
+        Write-Detail 'a layer should commit via Invoke-GatedCommit'
+    }
+}
+
+#───────────────────────────────────────────────────────────────────────────────
 # Context & prerequisites
 #───────────────────────────────────────────────────────────────────────────────
 
@@ -566,6 +650,65 @@ function Get-TemplateContext {
         ParentDir       = Split-Path -Parent $sourceRoot
     }
 }
+
+function Get-TemplateChain {
+    <#
+    .SYNOPSIS
+        Walks the inheritance chain upward from $StartRepoPath,
+        following each repo's 'template' remote.
+    .DESCRIPTION
+        Returns the LOCAL paths of every layer, nearest first:
+            [ .template-nuget, .template-dotnet, .github ]
+
+        Each ancestor is located by repo name,
+        as a sibling folder in $ParentDir.
+        Walking stops when a repo has no 'template' remote (the base),
+        or when the next ancestor isn't cloned locally.
+        Cycles and runaway depth are guarded.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$StartRepoPath,
+        [Parameter(Mandatory)][string]$ParentDir,
+        [int]$MaxDepth = 10
+    )
+    $chain = [System.Collections.Generic.List[string]]::new()
+    $seen = [System.Collections.Generic.HashSet[string]]::new()
+
+    $cur = (Resolve-Path $StartRepoPath).Path
+    [void]$seen.Add($cur.ToLowerInvariant())
+    $chain.Add($cur)
+
+    for ($i = 0; $i -lt $MaxDepth; $i++) {
+        $url = git -C $cur remote get-url template 2>$null
+        # A missing 'template' remote means the base layer was reached.
+        if ($LASTEXITCODE -ne 0 -or -not $url) { break }
+        if ($url.Trim() -notmatch '[:/][^/]+/([^/]+?)(\.git)?$') { break }
+        $ancestorPath = Join-Path $ParentDir $Matches[1]
+        if (-not (Test-Path (Join-Path $ancestorPath '.git'))) {
+            Write-Info ("Ancestor '$($Matches[1])' isn't cloned locally - " +
+                'ending chain walk')
+            break
+        }
+        $resolved = (Resolve-Path $ancestorPath).Path
+        if (-not $seen.Add($resolved.ToLowerInvariant())) { break }    # cycle
+        $chain.Add($resolved)
+        $cur = $resolved
+    }
+    # Reaching the base layer means the last `git remote get-url template`
+    # failed by design. Clear the leaked exit code so a later Assert-LastExit
+    # doesn't see a phantom failure.
+    $global:LASTEXITCODE = 0
+    return $chain.ToArray()
+}
+
+#───────────────────────────────────────────────────────────────────────────────
+# gh authentication (borrowed for this run only)
+#───────────────────────────────────────────────────────────────────────────────
+
+# Pushed by Use-GhAccount, popped by Reset-GhAccount.
+$script:GhStatePushed = $false
+$script:PriorGhToken = $null
+$script:PriorGhAccount = $null
 
 function Get-ActiveGhAccount {
     <#
@@ -720,7 +863,7 @@ function New-GitHubRepo {
 # Step: repo settings (API-settable, all idempotent)
 #───────────────────────────────────────────────────────────────────────────────
 
-function Set-ActionsPermissions {
+function Set-WorkflowPermission {
     <#
     .SYNOPSIS
         Allows GitHub Actions to create and approve PRs,
@@ -804,7 +947,7 @@ function Set-CodecovSecret {
     Write-Ok "Added repo secret CODECOV_TOKEN"
 }
 
-function Initialize-Topics {
+function Initialize-Topic {
     <#
     .SYNOPSIS
         Seeds one throwaway topic, so settings.yml can manage topics after that.
@@ -834,7 +977,7 @@ function Initialize-Topics {
     Write-Detail 'settings.yml replaces this on the next sync'
 }
 
-function Enable-ImmutableReleases {
+function Enable-ReleaseImmutability {
     <#
     .SYNOPSIS
         Enables immutable releases, locking assets and tags once published.
@@ -874,6 +1017,10 @@ function Enable-ImmutableReleases {
         -Title 'Enable release immutability' `
         -Steps $steps
 }
+
+#───────────────────────────────────────────────────────────────────────────────
+# Step: CodeQL default setup
+#───────────────────────────────────────────────────────────────────────────────
 
 # CodeQL languages this run should analyse. Layers add to it;
 # Enable-Codeql applies the union at the end. Seeded with 'actions'
@@ -1054,57 +1201,7 @@ function Get-NewRepoUrl {
     return $url
 }
 
-function Get-TemplateChain {
-    <#
-    .SYNOPSIS
-        Walks the inheritance chain upward from $StartRepoPath,
-        following each repo's 'template' remote.
-    .DESCRIPTION
-        Returns the LOCAL paths of every layer, nearest first:
-            [ .template-nuget, .template-dotnet, .github ]
-
-        Each ancestor is located by repo name,
-        as a sibling folder in $ParentDir.
-        Walking stops when a repo has no 'template' remote (the base),
-        or when the next ancestor isn't cloned locally.
-        Cycles and runaway depth are guarded.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$StartRepoPath,
-        [Parameter(Mandatory)][string]$ParentDir,
-        [int]$MaxDepth = 10
-    )
-    $chain = [System.Collections.Generic.List[string]]::new()
-    $seen = [System.Collections.Generic.HashSet[string]]::new()
-
-    $cur = (Resolve-Path $StartRepoPath).Path
-    [void]$seen.Add($cur.ToLowerInvariant())
-    $chain.Add($cur)
-
-    for ($i = 0; $i -lt $MaxDepth; $i++) {
-        $url = git -C $cur remote get-url template 2>$null
-        # A missing 'template' remote means the base layer was reached.
-        if ($LASTEXITCODE -ne 0 -or -not $url) { break }
-        if ($url.Trim() -notmatch '[:/][^/]+/([^/]+?)(\.git)?$') { break }
-        $ancestorPath = Join-Path $ParentDir $Matches[1]
-        if (-not (Test-Path (Join-Path $ancestorPath '.git'))) {
-            Write-Info ("Ancestor '$($Matches[1])' isn't cloned locally - " +
-                'ending chain walk')
-            break
-        }
-        $resolved = (Resolve-Path $ancestorPath).Path
-        if (-not $seen.Add($resolved.ToLowerInvariant())) { break }    # cycle
-        $chain.Add($resolved)
-        $cur = $resolved
-    }
-    # Reaching the base layer means the last `git remote get-url template`
-    # failed by design. Clear the leaked exit code so a later Assert-LastExit
-    # doesn't see a phantom failure.
-    $global:LASTEXITCODE = 0
-    return $chain.ToArray()
-}
-
-function Set-RemotesAndConfig {
+function Initialize-LocalRepo {
     <#
     .SYNOPSIS
         Ensures the 'template' remote, the push default, the commit template,
@@ -1174,46 +1271,15 @@ function Initialize-Clone {
         Write-Ok "Cloned $OriginUrl"
         Write-Detail "-> $TargetPath"
     }
-    Set-RemotesAndConfig -RepoPath $TargetPath -TemplateUrl $TemplateUrl
+    Initialize-LocalRepo -RepoPath $TargetPath -TemplateUrl $TemplateUrl
     Write-Ok "'template' remote -> $TemplateUrl; on branch main"
-}
-
-function Test-CommitExists {
-    <#
-    .SYNOPSIS
-        Returns true if THIS repo already made a commit with this exact subject.
-    .DESCRIPTION
-        Scoped to template/<branch>..HEAD.
-        Searching all history would match the same commits
-        inherited from an already-scaffolded parent,
-        and skip customizing the new repo entirely.
-        Returns false when the template ref is missing,
-        so the step re-runs harmlessly.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$RepoPath,
-        [Parameter(Mandatory)][string]$Message
-    )
-    $ref = "template/$($script:TemplateBranch)"
-    git -C $RepoPath rev-parse --verify --quiet $ref | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        $global:LASTEXITCODE = 0   # no template ref yet
-        return $false
-    }
-
-    # Exact subject match, so one group's message can't satisfy another's
-    # gate by prefix.
-    # A reverted step still reads as done,
-    # since the original subject remains in the range.
-    $subjects = git -C $RepoPath log --format='%s' "$ref..HEAD" 2>$null
-    return [bool](@($subjects) -ceq $Message)
 }
 
 #───────────────────────────────────────────────────────────────────────────────
 # Step: customize files (each edit is idempotent on its own)
 #───────────────────────────────────────────────────────────────────────────────
 
-function Remove-TemplateOnlyFiles {
+function Remove-TemplateOnlyFile {
     <#
     .SYNOPSIS
         Deletes the files listed in $TemplateOnlyFiles,
@@ -1232,7 +1298,7 @@ function Remove-TemplateOnlyFiles {
     if ($gone -eq 0) { Write-Skip 'No template-only files left to delete' }
 }
 
-function Update-RepoReferences {
+function Update-RepoReference {
     <#
     .SYNOPSIS
         Replaces references to the source template's owner/repo with the new one's.
@@ -1512,6 +1578,78 @@ function Write-SettingsFile {
     Write-Ok "Wrote .github/settings.yml ($Kind)"
 }
 
+function Rename-Token {
+    <#
+    .SYNOPSIS
+        Replaces a placeholder token in file content, file names,
+        and directory names.
+    .DESCRIPTION
+        Deepest paths first,
+        so renaming a parent cannot invalidate its children's paths.
+    .PARAMETER SkipExtension
+        Binary-ish extensions to leave alone.
+    .PARAMETER Exclude
+        Directory names to skip entirely, such as .git and build output.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepoPath,
+        [Parameter(Mandatory)][string]$From,
+        [Parameter(Mandatory)][string]$To,
+        [string[]]$SkipExtension = @(
+            '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg',
+            '.pdf', '.zip', '.dll', '.exe', '.snk'
+        ),
+        [string[]]$Exclude = @('.git', 'bin', 'obj', 'node_modules')
+    )
+    if ($From -eq $To) {
+        Write-Skip "Nothing to rename ('$From' is already '$To')"
+        return
+    }
+
+    $escaped = ($Exclude | ForEach-Object { [regex]::Escape($_) }) -join '|'
+    $skipRx = "[\\/]($escaped)[\\/]"
+    $all = Get-ChildItem -LiteralPath $RepoPath `
+        -Recurse `
+        -Force `
+        -ErrorAction SilentlyContinue
+    $all = @($all | Where-Object { $_.FullName -notmatch $skipRx })
+
+    # 1) content
+    $edited = 0
+    $files = @($all | Where-Object {
+            -not $_.PSIsContainer -and $_.Extension -notin $SkipExtension
+        })
+    foreach ($f in $files) {
+        $raw = Get-Content -LiteralPath $f.FullName -Raw `
+            -ErrorAction SilentlyContinue
+        if ($null -ne $raw -and $raw.Contains($From)) {
+            $updated = $raw.Replace($From, $To)
+            Set-Content -LiteralPath $f.FullName -Value $updated -NoNewline
+            $edited++
+        }
+    }
+
+    # 2) names, deepest first
+    $renamed = 0
+    $depth = { $_.FullName.Split([char]'\').Count }
+    $named = $all | Where-Object { $_.Name.Contains($From) }
+    $named = @($named | Sort-Object $depth -Descending)
+    foreach ($item in $named) {
+        # Skip anything a parent rename already moved.
+        if (-not (Test-Path -LiteralPath $item.FullName)) { continue }
+        Rename-Item -LiteralPath $item.FullName `
+            -NewName ($item.Name.Replace($From, $To)) -ErrorAction Stop
+        $renamed++
+    }
+
+    if ($edited -eq 0 -and $renamed -eq 0) {
+        Write-Skip "No '$From' found to rename"
+        return
+    }
+    Write-Ok "Renamed '$From' -> '$To'"
+    Write-Detail "$edited file(s) edited, $renamed path(s) renamed"
+}
+
 #───────────────────────────────────────────────────────────────────────────────
 # Step: VS Code multi-root workspace
 #───────────────────────────────────────────────────────────────────────────────
@@ -1693,50 +1831,35 @@ function Start-VSCode {
 # Step: commit / push / workflows
 #───────────────────────────────────────────────────────────────────────────────
 
-function Invoke-GatedCommit {
+function Test-CommitSubject {
     <#
     .SYNOPSIS
-        Runs a group of related changes and commits them,
-        unless that commit already exists.
+        Returns true if THIS repo already made a commit with this exact subject.
     .DESCRIPTION
-        $Message is both the commit subject and the idempotency key,
-        so rewording one silently makes an already-scaffolded repo
-        look unscaffolded.
-    .PARAMETER Paths
-        Pathspec to stage.
-        Omit it to stage exactly what -Body changed,
-        which is what you want for anything repo-wide.
-        Either way your own uncommitted work is excluded.
-    .PARAMETER Body
-        Scriptblock; it still sees the calling script's variables.
+        Scoped to template/<branch>..HEAD.
+        Searching all history would match the same commits
+        inherited from an already-scaffolded parent,
+        and skip customizing the new repo entirely.
+        Returns false when the template ref is missing,
+        so the step re-runs harmlessly.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
-        [Parameter(Mandatory)][string]$Message,
-        [string[]]$Paths,
-        [Parameter(Mandatory)][scriptblock]$Body
+        [Parameter(Mandatory)][string]$Message
     )
-    if (Test-CommitExists -RepoPath $RepoPath -Message $Message) {
-        Write-Skip "'$Message' already in history"
-        return
+    $ref = "template/$($script:TemplateBranch)"
+    git -C $RepoPath rev-parse --verify --quiet $ref | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        $global:LASTEXITCODE = 0   # no template ref yet
+        return $false
     }
 
-    if ($Paths) {
-        & $Body
-        Invoke-StagedCommit -RepoPath $RepoPath -Message $Message `
-            -Paths $Paths
-        return
-    }
-
-    # No -Paths: stage exactly what the body touched.
-    # A hand-maintained list would silently omit files
-    # that a repo-wide rename moved.
-    $before = @(Get-DirtyPath -RepoPath $RepoPath)
-    & $Body
-    $after = @(Get-DirtyPath -RepoPath $RepoPath)
-    $touched = @($after | Where-Object { $_ -notin $before })
-    if (-not $touched) { Write-Skip "Nothing changed for: $Message"; return }
-    Invoke-StagedCommit -RepoPath $RepoPath -Message $Message -Paths $touched
+    # Exact subject match, so one group's message can't satisfy another's
+    # gate by prefix.
+    # A reverted step still reads as done,
+    # since the original subject remains in the range.
+    $subjects = git -C $RepoPath log --format='%s' "$ref..HEAD" 2>$null
+    return [bool](@($subjects) -ceq $Message)
 }
 
 function Get-DirtyPath {
@@ -1763,124 +1886,50 @@ function Get-DirtyPath {
     return $paths.ToArray()
 }
 
-function Invoke-LayerModule {
+function Invoke-GatedCommit {
     <#
     .SYNOPSIS
-        Runs each layer module's entry point, base layer first.
-        No-op if the chain has none.
+        Runs a group of related changes and commits them,
+        unless that commit already exists.
     .DESCRIPTION
-        Layers commit their own work via Invoke-GatedCommit.
-        This only warns if one leaves changes uncommitted,
-        since every later step stages an explicit pathspec.
-    .PARAMETER Context
-        RepoPath, RepoName, Kind, OwnerRepo, SourceOwnerRepo.
+        $Message is both the commit subject and the idempotency key,
+        so rewording one silently makes an already-scaffolded repo
+        look unscaffolded.
+    .PARAMETER Paths
+        Pathspec to stage.
+        Omit it to stage exactly what -Body changed,
+        which is what you want for anything repo-wide.
+        Either way your own uncommitted work is excluded.
+    .PARAMETER Body
+        Scriptblock; it still sees the calling script's variables.
     #>
     param(
         [Parameter(Mandatory)][string]$RepoPath,
-        [Parameter(Mandatory)][hashtable]$Context
+        [Parameter(Mandatory)][string]$Message,
+        [string[]]$Paths,
+        [Parameter(Mandatory)][scriptblock]$Body
     )
-    $layers = Import-LayerModule
-    if (-not $layers) {
-        Write-Skip ('No Helpers-*.psm1 layers in this chain - ' +
-            'nothing template-specific to apply')
-        return
-    }
-    # Snapshot first, so the check below reports only what the LAYERS dirtied.
-    # The developer's own uncommitted work was already there,
-    # and is none of our business.
-    $status = {
-        @(git -C $RepoPath status --porcelain 2>$null)
-        $global:LASTEXITCODE = 0
-    }
-    $before = @(& $status)
-
-    foreach ($layer in $layers) {
-        Write-Info "$($layer.Name) -> $($layer.Entry.Name)"
-        & $layer.Entry -Context $Context
-    }
-
-    # A layer that changed files but committed nothing
-    # would leave them uncommitted forever:
-    # every later step stages an explicit pathspec,
-    # so nothing else picks them up.
-    $left = @((& $status) | Where-Object { $_ -notin $before })
-    if ($left) {
-        Write-Warn "$($left.Count) file(s) changed by a layer, uncommitted"
-        foreach ($l in $left) { Write-Detail $l.Trim() }
-        Write-Detail 'a layer should commit via Invoke-GatedCommit'
-    }
-}
-
-function Rename-Token {
-    <#
-    .SYNOPSIS
-        Replaces a placeholder token in file content, file names,
-        and directory names.
-    .DESCRIPTION
-        Deepest paths first,
-        so renaming a parent cannot invalidate its children's paths.
-    .PARAMETER SkipExtension
-        Binary-ish extensions to leave alone.
-    .PARAMETER Exclude
-        Directory names to skip entirely, such as .git and build output.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$RepoPath,
-        [Parameter(Mandatory)][string]$From,
-        [Parameter(Mandatory)][string]$To,
-        [string[]]$SkipExtension = @(
-            '.png', '.jpg', '.jpeg', '.gif', '.ico', '.svg',
-            '.pdf', '.zip', '.dll', '.exe', '.snk'
-        ),
-        [string[]]$Exclude = @('.git', 'bin', 'obj', 'node_modules')
-    )
-    if ($From -eq $To) {
-        Write-Skip "Nothing to rename ('$From' is already '$To')"
+    if (Test-CommitSubject -RepoPath $RepoPath -Message $Message) {
+        Write-Skip "'$Message' already in history"
         return
     }
 
-    $escaped = ($Exclude | ForEach-Object { [regex]::Escape($_) }) -join '|'
-    $skipRx = "[\\/]($escaped)[\\/]"
-    $all = Get-ChildItem -LiteralPath $RepoPath `
-        -Recurse `
-        -Force `
-        -ErrorAction SilentlyContinue
-    $all = @($all | Where-Object { $_.FullName -notmatch $skipRx })
-
-    # 1) content
-    $edited = 0
-    $files = @($all | Where-Object {
-            -not $_.PSIsContainer -and $_.Extension -notin $SkipExtension
-        })
-    foreach ($f in $files) {
-        $raw = Get-Content -LiteralPath $f.FullName -Raw `
-            -ErrorAction SilentlyContinue
-        if ($null -ne $raw -and $raw.Contains($From)) {
-            $updated = $raw.Replace($From, $To)
-            Set-Content -LiteralPath $f.FullName -Value $updated -NoNewline
-            $edited++
-        }
-    }
-
-    # 2) names, deepest first
-    $renamed = 0
-    $depth = { $_.FullName.Split([char]'\').Count }
-    $named = $all | Where-Object { $_.Name.Contains($From) }
-    $named = @($named | Sort-Object $depth -Descending)
-    foreach ($item in $named) {
-        # Skip anything a parent rename already moved.
-        if (-not (Test-Path -LiteralPath $item.FullName)) { continue }
-        Rename-Item -LiteralPath $item.FullName `
-            -NewName ($item.Name.Replace($From, $To)) -ErrorAction Stop
-        $renamed++
-    }
-
-    if ($edited -eq 0 -and $renamed -eq 0) {
-        Write-Skip "No '$From' found to rename"
+    if ($Paths) {
+        & $Body
+        Invoke-StagedCommit -RepoPath $RepoPath -Message $Message `
+            -Paths $Paths
         return
     }
-    Write-Ok "Renamed '$From' -> '$To'"
-    Write-Detail "$edited file(s) edited, $renamed path(s) renamed"
+
+    # No -Paths: stage exactly what the body touched.
+    # A hand-maintained list would silently omit files
+    # that a repo-wide rename moved.
+    $before = @(Get-DirtyPath -RepoPath $RepoPath)
+    & $Body
+    $after = @(Get-DirtyPath -RepoPath $RepoPath)
+    $touched = @($after | Where-Object { $_ -notin $before })
+    if (-not $touched) { Write-Skip "Nothing changed for: $Message"; return }
+    Invoke-StagedCommit -RepoPath $RepoPath -Message $Message -Paths $touched
 }
 
 function Invoke-StagedCommit {
@@ -1983,6 +2032,10 @@ function Start-TemplateSync {
     }
 }
 
+#───────────────────────────────────────────────────────────────────────────────
+# Exports
+#───────────────────────────────────────────────────────────────────────────────
+
 Export-ModuleMember -Function @(
     # Logging vocabulary - part of the contract; the scripts use these directly.
     'Write-Ok'
@@ -2010,30 +2063,30 @@ Export-ModuleMember -Function @(
     'Import-LayerModule'
     'Remove-LayerModule'
     'Resolve-Input'
-    'Set-SkipPrompts'
+    'Set-SkipPrompt'
     'Get-ChangeCount'
     'Add-ManualItem'
-    'Register-ManualSettings'
+    'Register-ManualSetting'
     'Show-ManualChecklist'
     'Get-TemplateContext'
     'Get-ActiveGhAccount'
     'Use-GhAccount'
     'Reset-GhAccount'
     'New-GitHubRepo'
-    'Set-ActionsPermissions'
+    'Set-WorkflowPermission'
     'Enable-PrivateVulnReporting'
     'Set-CodecovSecret'
-    'Initialize-Topics'
-    'Enable-ImmutableReleases'
+    'Initialize-Topic'
+    'Enable-ReleaseImmutability'
     'Add-CodeqlLanguage'
     'Get-CodeqlLanguage'
     'Enable-Codeql'
     'Get-NewRepoUrl'
     'Get-TemplateChain'
     'Initialize-Clone'
-    'Test-CommitExists'
-    'Remove-TemplateOnlyFiles'
-    'Update-RepoReferences'
+    'Test-CommitSubject'
+    'Remove-TemplateOnlyFile'
+    'Update-RepoReference'
     'Update-Readme'
     'Set-TemplateSyncConfig'
     'Remove-ScriptsFolder'

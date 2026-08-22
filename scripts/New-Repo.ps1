@@ -89,7 +89,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'Helpers.psm1') -Force
-Set-SkipPrompts $SkipManualPrompts.IsPresent
+Set-SkipPrompt $SkipManualPrompts.IsPresent
 $bound = $PSBoundParameters
 
 # Show terminating errors as a readable banner, not a raw PowerShell dump,
@@ -174,10 +174,10 @@ New-GitHubRepo -OwnerRepo $ownerRepo
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '2' 'Configure repo settings (API)'
-Set-ActionsPermissions      -OwnerRepo $ownerRepo
+Set-WorkflowPermission      -OwnerRepo $ownerRepo
 Enable-PrivateVulnReporting -OwnerRepo $ownerRepo
-Enable-ImmutableReleases    -OwnerRepo $ownerRepo
-Initialize-Topics           -OwnerRepo $ownerRepo
+Enable-ReleaseImmutability    -OwnerRepo $ownerRepo
+Initialize-Topic           -OwnerRepo $ownerRepo
 Set-CodecovSecret           -OwnerRepo $ownerRepo -Token $CodecovToken
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -204,7 +204,7 @@ Invoke-GatedCommit -RepoPath $targetPath `
     -Message 'chore: remove template-only files' `
     -Paths $paths `
     -Body {
-    Remove-TemplateOnlyFiles -RepoPath $targetPath
+    Remove-TemplateOnlyFile -RepoPath $targetPath
     if ($Kind -eq 'Code') { Remove-ScriptsFolder -RepoPath $targetPath }
     Update-Readme            -RepoPath $targetPath
 }
@@ -224,7 +224,7 @@ Invoke-GatedCommit -RepoPath $targetPath `
     -Message 'chore: retarget template references' `
     -Paths $paths `
     -Body {
-    Update-RepoReferences -RepoPath $targetPath `
+    Update-RepoReference -RepoPath $targetPath `
         -OldOwnerRepo $ctx.SourceOwnerRepo `
         -NewOwnerRepo $ownerRepo
 }
@@ -322,7 +322,7 @@ Start-VSCode -Target $wsFile
 
 Remove-LayerModule
 Reset-GhAccount
-Register-ManualSettings -OwnerRepo $ownerRepo
+Register-ManualSetting -OwnerRepo $ownerRepo
 Show-ManualChecklist    -OwnerRepo $ownerRepo
 Show-Summary
 
