@@ -176,8 +176,8 @@ New-GitHubRepo -OwnerRepo $ownerRepo
 Write-Step '2' 'Configure repo settings (API)'
 Set-WorkflowPermission      -OwnerRepo $ownerRepo
 Enable-PrivateVulnReporting -OwnerRepo $ownerRepo
-Enable-ReleaseImmutability    -OwnerRepo $ownerRepo
-Initialize-Topic           -OwnerRepo $ownerRepo
+Enable-ReleaseImmutability  -OwnerRepo $ownerRepo
+Initialize-Topic            -OwnerRepo $ownerRepo
 Set-CodecovSecret           -OwnerRepo $ownerRepo -Token $CodecovToken
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -206,7 +206,7 @@ Invoke-GatedCommit -RepoPath $targetPath `
     -Body {
     Remove-TemplateOnlyFile -RepoPath $targetPath
     if ($Kind -eq 'Code') { Remove-ScriptsFolder -RepoPath $targetPath }
-    Update-Readme            -RepoPath $targetPath
+    Update-Readme           -RepoPath $targetPath
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -323,7 +323,7 @@ Start-VSCode -Target $wsFile
 Remove-LayerModule
 Reset-GhAccount
 Register-ManualSetting -OwnerRepo $ownerRepo
-Show-ManualChecklist    -OwnerRepo $ownerRepo
+Show-ManualChecklist   -OwnerRepo $ownerRepo
 Show-Summary
 
 if ((Get-ChangeCount) -eq 0) {
