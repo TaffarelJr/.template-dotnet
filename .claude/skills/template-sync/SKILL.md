@@ -1,0 +1,79 @@
+---
+name: template-sync
+description: >-
+  Reviews and resolves a Template Sync pull request - the automated merge that
+  brings changes down from this repo's parent template. Use when a
+  "Merge changes from template repo" PR appears, when one is marked NEEDS
+  RESOLUTION, or when asked why a sync is failing.
+when_to_use: >-
+  Trigger phrases: template sync PR, sync from the template, needs resolution,
+  why did the template sync fail.
+argument-hint: "[optional PR number]"
+allowed-tools: Read Grep Glob Bash
+---
+
+Template Sync merges the parent template's `main` into a `template-sync`
+branch and opens a PR. Read `scripts/README.md` for how the chain fits
+together before resolving anything.
+
+## 1. Find out what it wants to change
+
+`gh pr list --head template-sync` then `gh pr diff <n>`.
+
+Say what the PR contains before touching it. Three shapes, and they need
+different responses:
+
+- **Nothing.** A clean sync opens no PR at all. A PR with an empty diff means
+  something odd happened — investigate rather than merge.
+- **Genuine upstream changes.** The parent improved something. This is the
+  normal case.
+- **Conflicts** — the PR title starts `NEEDS RESOLUTION`. The workflow pushed
+  the branch with conflict markers still in it.
+
+## 2. Resolve conflicts by asking who owns the file
+
+This is the whole judgement, and getting it backwards is how a repo loses its
+own customizations or drifts from its template.
+
+- **`scripts/Helpers.psm1`, `scripts/New-Repo.ps1` — the template, always.**
+  These must stay byte-identical at every layer. If this repo edited one, that
+  edit was the mistake; move it into a `Helpers-<NN>-<slug>.psm1` instead.
+- **`.github/settings.yml` — this repo.** It declares only its own deltas.
+  The rest is inherited through `_extends` at runtime, not through the file.
+- **`.github/workflows/template-sync.yml` — split.** This repo owns
+  `TEMPLATE_REPO_URL` and the schedule; the template owns the steps.
+- **`README.md` — split.** This repo owns the diagram highlight and its own
+  tables; the template owns the shared structure.
+- **`LICENSE` — this repo**, if it is private and carries the proprietary
+  notice. Otherwise the template.
+- **`Helpers-*.psm1`, `.claude/`, `docs/` — whichever side changed.** These
+  are additive, so a conflict usually means both sides edited the same line.
+  Read both before choosing.
+- **Anything else — prefer the template**, and treat the conflict as a signal
+  that this repo customized something it should not have.
+
+Resolve locally: check out the branch, fix the markers, and verify before
+pushing. Never resolve by taking one whole side blindly.
+
+## 3. Verify before merging
+
+- `git grep -n '<<<<<<<'` finds nothing.
+- Scripts still parse, and the module still imports with the export count you
+  expect.
+- The required checks pass on the branch.
+- The result is still byte-identical to the parent for the files the table
+  says the template owns. Diff them explicitly:
+  `git diff template/main -- scripts/Helpers.psm1` should be empty.
+
+## 4. Merge, then check the next layer
+
+Merge the PR. If this repo is itself a template, its own descendants will not
+see the change until *their* sync runs — so say which repos are now behind,
+and offer to dispatch their syncs.
+
+## If the workflow itself failed
+
+Read the run: `gh run view <id> --log-failed`. The usual causes are a
+`TEMPLATE_REPO_URL` pointing at the wrong repo (it is inherited verbatim, so
+a level-2 repo can end up syncing from its grandparent), a ruleset blocking
+the push of the `template-sync` branch, or the parent having no `main`.

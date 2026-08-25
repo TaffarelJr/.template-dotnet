@@ -1557,6 +1557,118 @@ function Update-Readme {
     Write-Ok 'De-linked the template-only files in README.md'
 }
 
+function Update-ReadmeDiagram {
+    <#
+    .SYNOPSIS
+        Points the README's structure diagram at this repo's own tier.
+    .DESCRIPTION
+        The base .github repo highlights itself, next to the note explaining
+        what it is. A derived repo should highlight a node one row down
+        instead, so the picture reads "you are here" rather than "you are the
+        base". Which specific tier is highlighted does not matter - the point
+        is to convey the layering.
+
+        Only the BASE repo's marker is ever retargeted. That makes this both
+        idempotent and correct at any depth: a second-layer template inherits
+        a diagram already pointing at the template row, so there is nothing
+        to change, and a repo whose diagram was rewritten by hand is left
+        alone.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepoPath,
+        [Parameter(Mandatory)][ValidateSet('Template', 'Code')][string]$Kind
+    )
+    $path = Join-Path $RepoPath 'README.md'
+    if (-not (Test-Path $path)) {
+        Write-Skip 'README.md not found'
+        return
+    }
+
+    # A template becomes the right-most template in the second row;
+    # a code repo becomes the leaf sitting beside it.
+    $node = if ($Kind -eq 'Template') { 'templateB' } else { 'repo1' }
+    $from = 'class github current'
+    $to = "class $node current"
+
+    $raw = Get-Content -Raw $path
+    if (-not $raw.Contains($from)) {
+        Write-Skip 'README diagram does not highlight the base repo'
+        return
+    }
+
+    Set-Content -Path $path -Value $raw.Replace($from, $to) -NoNewline
+    Write-Ok "Retargeted the README diagram at '$node'"
+}
+
+function Set-RepoLicense {
+    <#
+    .SYNOPSIS
+        Replaces the inherited MIT license with a proprietary notice,
+        for a private repo.
+    .DESCRIPTION
+        MIT grants everyone the right to use, copy and sell the code, which
+        is the opposite of what a private repo wants. No OSI-approved licence
+        can express "nobody may use this without an arrangement", because
+        permitting use is what makes a licence open source - so a private repo
+        gets an explicit all-rights-reserved notice instead.
+
+        The existing copyright line is carried over verbatim, so the holder
+        and year stay whatever the chain already says.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepoPath,
+        [ValidateSet('Public', 'Private')][string]$Visibility = 'Public'
+    )
+    if ($Visibility -ne 'Private') {
+        Write-Skip 'Public repo - keeping the inherited MIT license'
+        return
+    }
+
+    $path = Join-Path $RepoPath 'LICENSE'
+    if (-not (Test-Path $path)) {
+        Write-Warn 'LICENSE not found'
+        return
+    }
+
+    $raw = Get-Content -Raw $path
+    if ($raw.StartsWith('All Rights Reserved')) {
+        Write-Skip 'LICENSE is already proprietary'
+        return
+    }
+
+    $copyright = "Copyright (c) $((Get-Date).Year)"
+    if ($raw -match 'Copyright \(c\)[^\r\n]*') { $copyright = $Matches[0] }
+
+    $lines = @(
+        'All Rights Reserved'
+        ''
+        $copyright
+        ''
+        'This software and its source code are proprietary and confidential.'
+        ''
+        'No permission is granted to any person to use, copy, modify, merge,'
+        'publish, distribute, sublicense, or sell copies of this software, in'
+        'whole or in part, by any means, without the prior written permission'
+        'of the copyright holder. Unauthorized copying, distribution, or use,'
+        'via any medium, is strictly prohibited.'
+        ''
+        'To enquire about a licence, contact the copyright holder.'
+        ''
+        'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,'
+        'EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF'
+        'MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND'
+        'NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS'
+        'BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN'
+        'ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN'
+        'CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE'
+        'SOFTWARE.'
+    )
+    $content = ($lines -join "`r`n") + "`r`n"
+    Set-Content -Path $path -Value $content -NoNewline -Encoding utf8
+    Write-Ok 'Replaced the MIT license with an all-rights-reserved notice'
+    Write-Detail 'GitHub shows no licence badge for a proprietary repo'
+}
+
 function Set-TemplateSyncConfig {
     <#
     .SYNOPSIS
@@ -2374,6 +2486,8 @@ Export-ModuleMember -Function @(
     'Remove-TemplateOnlyFile'
     'Update-RepoReference'
     'Update-Readme'
+    'Update-ReadmeDiagram'
+    'Set-RepoLicense'
     'Set-TemplateSyncConfig'
     'Remove-ScriptsFolder'
 

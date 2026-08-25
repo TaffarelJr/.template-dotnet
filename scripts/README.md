@@ -3,11 +3,11 @@
 These scripts create a new repo **derived from the current repo**.
 Each one creates a new repo on GitHub, and clones it next to this one locally.
 
-| File                  | Purpose                                                  |
-| --------------------- | -------------------------------------------------------- |
-| 📄 `Helpers.psm1`  | Shared helper module — one function per step             |
-| 📄 `New-Repo.ps1`      | Create a new repo — `-Kind Template` or `-Kind Code`     |
-| 📄 `Helpers-*.psm1`| _Optional, one per layer_ — helpers + that layer's steps  |
+| File                | Purpose                                                  |
+| ------------------- | -------------------------------------------------------- |
+| 📄 `Helpers.psm1`    | Shared helper module — the whole library                  |
+| 📄 `New-Repo.ps1`    | Create a new repo — `-Kind Template` or `-Kind Code`      |
+| 📄 `Helpers-*.psm1`  | _Optional, one or more per layer_ — that layer's additions |
 
 `-Kind` drives the only two differences: a **Template** keeps `scripts/` so it can spawn its
 own children, while **Code** removes `scripts/` and sets `is_template: false`.
@@ -28,8 +28,8 @@ So you can run fully interactive, partially pre-filled, or fully unattended.
 
 # fully unattended - no prompts at all (scriptable / batchable)
 ./scripts/New-Repo.ps1 -Kind Code -Name my-service `
-    -Description 'My service' -Homepage '' -Topics 'dotnet, service' `
-    -CodecovToken $env:CODECOV -SkipManualPrompts
+    -Visibility Public -Description 'My service' -Homepage '' `
+    -Topics 'dotnet, service' -CodecovToken $env:CODECOV -SkipManualPrompts
 ```
 
 Parameters:
@@ -37,10 +37,14 @@ Parameters:
 - `-Kind` — `Template` (a new layer) or `Code` (a leaf repo). Default: `Code`.
 - `-Name` — the new repo name, in kebab-case. For `-Kind Template` the `.template-`
   prefix is optional: `dotnet` and `.template-dotnet` both give `.template-dotnet`.
-- `-Description` — the repo description for `settings.yml`
-  (must be a single line).
-- `-Homepage` — the repo homepage URL for `settings.yml` (empty to omit it).
+- `-Visibility` — `Public` or `Private`. Default: `Public`.
+  Applied at creation only; an existing repo keeps the visibility it has.
+- `-Description` — the repo description for `settings.yml`.
+  Required, one line, 350 characters or fewer.
+- `-Homepage` — the repo homepage URL for `settings.yml`.
+  An `http(s)` URL, or empty to omit it.
 - `-Topics` — the repo topics for `settings.yml` (comma-separated).
+  Normalised to what GitHub accepts: lowercase, letters, digits and hyphens.
 - `-CodecovToken` — the `CODECOV_TOKEN` secret value
   (empty to skip; prompted without echo when omitted).
 - `-SkipManualPrompts` — skip every prompt and the confirmation gate;
@@ -48,6 +52,12 @@ Parameters:
 
 An explicit empty value (e.g. `-Homepage ''`) counts as "supplied"
 and skips that prompt.
+
+Every value is validated wherever it comes from, but the response differs:
+a prompt says what is wrong and asks again, while a bad command-line value
+or default throws, because there is nobody to ask. That matters because
+PowerShell's own `[ValidateSet]` only checks parameters that were *bound* —
+a prompt answer would otherwise go unchecked.
 
 The GitHub **owner is a constant** (`$script:RepoOwner` in `Helpers.psm1`) —
 this scaffolding is personal-only, so there's no owner parameter to pass. The scripts warn
@@ -61,10 +71,14 @@ four commits, each with a single concern, so the history stays readable:
 1. `chore: remove template-only files` — deletes the files that belong only to the base repo,
    de-links their rows in `README.md` (and removes `scripts/` for a code repo).
 2. `chore: retarget template references` — rewrites `owner/parent` → `owner/this-repo` in
-   `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` and `.github/ISSUE_TEMPLATE/*`.
+   `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` and `.github/ISSUE_TEMPLATE/*`, and
+   moves the README diagram's highlight off the base repo onto this repo's own tier.
 3. `ci: enable the template sync schedule` — points `TEMPLATE_REPO_URL` at the **immediate
    parent** and switches the nightly schedule on.
-4. `chore: customize repo settings` — writes `.github/settings.yml`.
+4. `chore: customize repo settings` — writes `.github/settings.yml`, and for a private repo
+   replaces the inherited MIT license with an all-rights-reserved notice.
+
+Plus one commit per layer, from each `Helpers-*.psm1` that contributes an entry point.
 
 Each commit stages only its own pathspec, so a re-run can never sweep unrelated
 uncommitted work into a `chore:` commit.
@@ -110,8 +124,14 @@ Helpers-20-nuget.psm1     added by .template-nuget
 Helpers-20-winui.psm1     added by .template-winui   (sibling; never sees nuget's)
 ```
 
-Loaded in filename order, so `<NN>` is the layer tier. Each module exports **helpers for its
-descendants to reuse**, plus exactly one entry point matching `Invoke-*Scaffold`:
+Any `*.psm1` beside `Helpers.psm1` is a layer module — the name is a convention, not a
+requirement, and nothing inherited needs editing to add one. They load in filename order,
+which is why the convention carries a tier number. Import order is not what matters (every
+module is imported `-Global`, and calls happen later); the tier fixes the order their entry
+points **run** in, so a parent's scaffolding finishes before a child's starts.
+
+Each module exports **helpers for its descendants to reuse**, and optionally one entry
+point matching `Invoke-*Scaffold`:
 
 ```powershell
 # .template-dotnet/scripts/Helpers-10-dotnet.psm1
@@ -129,8 +149,9 @@ A lower layer can then call `Rename-DotnetProject` directly — the modules are 
 using modules rather than plain scripts.
 
 The entry point is discovered from the module's own `ExportedFunctions`, so its name is never
-coupled to the filename — only to the `Invoke-*Scaffold` pattern. Exactly one is required;
-zero or several fails loudly as a configuration error.
+coupled to the filename — only to the `Invoke-*Scaffold` pattern. **None** is fine: a layer
+is free to contribute helpers only, and that is logged rather than treated as an error. Two
+or more throws, because the order they would run in is ambiguous.
 
 **Why one module per layer rather than one shared file:** with a single fixed name, every
 layer would have to *edit* its parent's copy to append its steps — guaranteeing a merge
@@ -159,6 +180,12 @@ construction, so it can never be swept in.
 
 If a layer changes files and commits nothing, the run warns — every later step stages an
 explicit pathspec, so those changes would otherwise be left behind for good.
+
+### AI agents and skills
+
+`.claude/` carries the reviewers and procedures, and is inherited the same
+way. See [docs/AiInstructions.md](../docs/AiInstructions.md) — including
+which agent or skill belongs at which layer.
 
 ### Settings inheritance
 
@@ -190,8 +217,8 @@ Things to know when editing a shared layer:
 
 Each new repo also gets a `<repo>.code-workspace` multi-root workspace containing the
 new repo **plus every template layer in its chain**, so template fixes can be made
-without switching windows. It is excluded via `.git/info/exclude` (per-clone, never
-committed), and the script opens it in VS Code when finished.
+without switching windows. `.gitignore` already ignores `*.code-workspace`, so it never
+reaches a commit, and the script opens it in VS Code when finished.
 
 The new repo is listed first (`folders[0]`), and `dotnet.defaultSolution` pins its
 solution so C# Dev Kit doesn't adopt a template layer's placeholder `.sln`. If the repo
@@ -200,26 +227,29 @@ has no solution yet, that setting is `"disable"` — replace it once you add one
 ## What's automated vs. manual
 
 - ✅ **Automated:**
-  - Repo creation
+  - Repo creation, public or private
   - Actions: allowed to create and approve PRs
-  - Private vulnerability reporting
-  - Release immutability
+  - Private vulnerability reporting (falls back to the checklist if refused)
+  - Release immutability (same fallback)
   - `CODECOV_TOKEN` secret
-  - CodeQL default setup (post-push)
+  - CodeQL default setup (post-push, for every language the chain registered)
   - Clone + remotes
   - File deletes and scoped find-replace
   - De-linking README rows for the deleted files (and their orphaned link refs)
+  - Retargeting the README diagram at this repo's own tier
+  - An all-rights-reserved `LICENSE`, for a private repo
   - Retargeting `TEMPLATE_REPO_URL` at the immediate parent + enabling the sync cron
-  - `settings.yml` (with chained `_extends`)
-  - Commits, push, and running Template Sync
-  - `<repo>.code-workspace` + local git exclude, then opening it in VS Code
+  - `settings.yml` (with chained `_extends`, and `private: true` when private)
+  - Commits and push
+  - Running Template Sync **and verifying it finished clean with no PR**
+  - `<repo>.code-workspace`, then opening it in VS Code
 - 📋 **Manual** — printed as a checklist at the end
   (these have no API, so do them in the web UI):
   - Per-push branch/tag limit
   - Code review limits
   - Grouped security updates
-  - Dependency graph — **only if the repo is private**
-    (public repos always have it on)
+  - Dependency graph — listed **only for a private repo**
+    (a public one always has it on, with no toggle)
   - Verifying the description and topics landed on the home page
 
 Release immutability used to be on the manual list. It has no field on the repo `PATCH`

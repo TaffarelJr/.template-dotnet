@@ -244,6 +244,7 @@ Write-Step '5' 'Retarget template references'
 $paths = @(
     '.github/ISSUE_TEMPLATE'
     'CONTRIBUTING.md'
+    'README.md'
     'SECURITY.md'
     'SUPPORT.md'
 )
@@ -254,6 +255,7 @@ Invoke-GatedCommit -RepoPath $targetPath `
     Update-RepoReference -RepoPath $targetPath `
         -OldOwnerRepo $ctx.SourceOwnerRepo `
         -NewOwnerRepo $ownerRepo
+    Update-ReadmeDiagram -RepoPath $targetPath -Kind $Kind
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -288,11 +290,12 @@ Invoke-LayerModule -RepoPath $targetPath -Context @{
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '8' 'Customize repo settings'
-$paths = @('.github/settings.yml')
+$paths = @('.github/settings.yml', 'LICENSE')
 Invoke-GatedCommit -RepoPath $targetPath `
     -Message 'chore: customize repo settings' `
     -Paths $paths `
     -Body {
+    Set-RepoLicense -RepoPath $targetPath -Visibility $Visibility
     # _extends resolves recursively, so this inherits the whole chain.
     Write-SettingsFile -RepoPath $targetPath `
         -Kind $Kind `

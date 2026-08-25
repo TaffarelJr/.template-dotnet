@@ -75,9 +75,11 @@ right home for anything that grew out of `AGENTS.md` into a sequence of steps.
 
 | Skill | Does |
 | :---- | :--- |
-| `/review` | Fans the three reviewers out in parallel, then merges and ranks |
+| `/review` | Fans the four reviewers out in parallel, then merges and ranks |
 | `/tdd` | Red, green, refactor - one behaviour per cycle |
 | `/commit` | Groups changes by concern and writes a Conventional Commit |
+| `/pr` | Opens a PR, described from the commits the branch actually holds |
+| `/template-sync` | Reviews and resolves a sync PR from the parent template |
 
 `/tdd` sets `disable-model-invocation: true`, so it only runs when you ask.
 The other two are worth letting the model reach for on its own.
@@ -93,11 +95,16 @@ review and very little else.
 | `security-reviewer` | Injection, secrets, authz, unsafe input, dependencies |
 | `perf-reviewer` | Complexity, allocations, N+1, blocking async |
 | `quality-reviewer` | This repo's conventions, naming, comments, tests |
+| `docs-reviewer` | Whether the docs are still true after the change |
 
-All three are read-only, by `tools: Read, Grep, Glob, Bash` plus
+All four are read-only, by `tools: Read, Grep, Glob, Bash` plus
 `disallowedTools: Write, Edit`. That restriction is the point: a reviewer that
 can edit will quietly fix what it found instead of telling you, and you lose
 the review.
+
+`docs-reviewer` earns its place in a repo that documents itself this heavily.
+A rename touches the README tables, `scripts/README.md`, comment-based help
+and the instruction files, and stale documentation is worse than none.
 
 ### What deliberately isn't an agent
 
@@ -123,8 +130,17 @@ Vague ones are why parallel agents duplicate each other's work.
 ### Adding one
 
 Both are additive per layer, like everything else here: drop in a file, edit
-nothing inherited. A `test-runner` agent needs a language-specific command, so
-it belongs in `.template-dotnet`, not in this base repo.
+nothing inherited. Anything needing a language-specific command or a
+language-specific rule belongs in the layer that owns it, not here:
+
+| Layer | Worth adding |
+| :---- | :----------- |
+| `.template-dotnet` | `test-runner` agent (`dotnet test`, summarised); `/coverage` |
+| `.template-nuget` | `api-compat-reviewer` — public surface changes and what they mean for the version; `/release` |
+| a future UI template | `accessibility-reviewer` |
+| a future Terraform template | `/plan-review` — read a plan and flag destructive changes |
+
+This base repo carries only what every repo has.
 
 ## Adding a file type
 

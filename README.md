@@ -133,7 +133,7 @@ because most files need repo-specific customization.
 | 📁[.vscode/][vsCodeFolder]             | Contains VSCode settings                         |
 | 📁[docs/][docsFolder]                  | Contains documentation                           |
 | 📁[scripts/][scriptsFolder]            | [Repo scaffolding scripts][scriptsFile]          |
-| 📄[\_checklist.md][checklistFile]      | New template repo checklist                      |
+
 | 📄[.editorconfig][editorConfigFile]    | [Styleguide rule definitions][styleguideFile]    |
 | 📄[.gitattributes][gitAttributesFile]  | Built using [scaffolding][ghGitAttributes]       |
 | 📄[.gitignore][gitIgnoreFile]          | Built using [scaffolding][ghGitIgnore]           |
@@ -163,7 +163,7 @@ because most files need repo-specific customization.
 [styleguideFile-commit]: ./docs/Styleguide.md#commit-messages
 [scriptsFolder]: ./scripts/
 [scriptsFile]: ./scripts/README.md
-[checklistFile]: ./_checklist.md
+
 [editorConfigFile]: ./.editorconfig
 [gitAttributesFile]: ./.gitattributes
 [gitIgnoreFile]: ./.gitignore
