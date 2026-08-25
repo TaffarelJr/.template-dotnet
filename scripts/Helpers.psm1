@@ -2066,8 +2066,8 @@ function Wait-TemplateSync {
         Start-Sleep -Seconds $PollSeconds
         $now = Get-WorkflowRunId -OwnerRepo $OwnerRepo `
             -Workflow 'template-sync.yml'
-        $runId = @($now | Where-Object { $_ -notin $Handle.PriorRunId }) |
-            Select-Object -First 1
+        $fresh = @($now | Where-Object { $_ -notin $Handle.PriorRunId })
+        $runId = $fresh | Select-Object -First 1
     }
     if (-not $runId) {
         Write-Warn 'Template Sync did not start within the timeout'
