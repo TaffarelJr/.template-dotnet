@@ -1448,40 +1448,6 @@ function Remove-ScriptsFolder {
     }
 }
 
-function Add-GitExclude {
-    <#
-    .SYNOPSIS
-        Adds a pattern to .git/info/exclude, a per-clone ignore list.
-    .DESCRIPTION
-        .git/info/exclude is never committed,
-        so it can't leak into the template chain the way .gitignore would.
-        Idempotent. Uses LF: this is a git-internal control file,
-        and a stray CR would become part of the pattern.
-    #>
-    param(
-        [Parameter(Mandatory)][string]$RepoPath,
-        [Parameter(Mandatory)][string]$Pattern
-    )
-    $excludeFile = Join-Path $RepoPath '.git/info/exclude'
-    $infoDir = Split-Path -Parent $excludeFile
-    if (-not (Test-Path $infoDir)) {
-        New-Item -ItemType Directory -Force $infoDir | Out-Null
-    }
-
-    $lines = if (Test-Path $excludeFile) {
-        @(Get-Content $excludeFile)
-    }
-    else { @() }
-    if ($lines -contains $Pattern) {
-        Write-Skip "'$Pattern' is already excluded locally"
-        return
-    }
-
-    $out = @($lines) + @($Pattern)
-    [System.IO.File]::WriteAllText($excludeFile, (($out -join "`n") + "`n"))
-    Write-Ok "Excluded '$Pattern' via .git/info/exclude (never committed)"
-}
-
 function Write-SettingsFile {
     <#
     .SYNOPSIS
@@ -2005,31 +1971,165 @@ function Push-Repo {
     }
 }
 
+function Get-WorkflowRunId {
+    <#
+    .SYNOPSIS
+        Returns the run IDs a workflow currently has, newest first.
+    .DESCRIPTION
+        Used to tell a run we just dispatched apart from earlier ones,
+        because `gh workflow run` does not report the ID it created.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$OwnerRepo,
+        [Parameter(Mandatory)][string]$Workflow
+    )
+    $ghArgs = @(
+        'run', 'list'
+        '--repo', $OwnerRepo
+        '--workflow', $Workflow
+        '--limit', '20'
+        '--json', 'databaseId'
+        '--jq', '.[].databaseId'
+    )
+    $ids = & gh @ghArgs 2>$null
+    $global:LASTEXITCODE = 0
+    return @($ids | Where-Object { $_ } | ForEach-Object { [string]$_ })
+}
+
 function Start-TemplateSync {
     <#
     .SYNOPSIS
-        Dispatches the Template Sync workflow,
-        to verify it works and initialize its baseline.
+        Dispatches the Template Sync workflow, and returns the runs that
+        already existed so Wait-TemplateSync can spot the new one.
+    .DESCRIPTION
+        Returns $null when the dispatch itself failed, which is the signal
+        not to wait for anything.
     #>
     param([Parameter(Mandatory)][string]$OwnerRepo)
+
+    $before = Get-WorkflowRunId -OwnerRepo $OwnerRepo `
+        -Workflow 'template-sync.yml'
+
     $ghArgs = @(
         'workflow', 'run', 'template-sync.yml'
         '--repo', $OwnerRepo
         '--ref', 'main'
     )
     & gh @ghArgs 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        Add-Change
-        Write-Ok 'Dispatched Template Sync'
-        Write-Detail ("verify: gh run list --repo $OwnerRepo " +
-            '--workflow template-sync.yml')
-        Write-Detail "expect no errors and NO pull request"
-    }
-    else {
+    if ($LASTEXITCODE -ne 0) {
+        $global:LASTEXITCODE = 0
         Write-Warn ('Could not dispatch Template Sync yet ' +
             '(the workflow may still be registering)')
         Write-Detail "run it from https://github.com/$OwnerRepo/actions"
+        return $null
     }
+
+    Add-Change
+    Write-Ok 'Dispatched Template Sync'
+    return @{ PriorRunId = $before }
+}
+
+function Wait-TemplateSync {
+    <#
+    .SYNOPSIS
+        Waits for the dispatched Template Sync run, then checks it did nothing.
+    .DESCRIPTION
+        A freshly scaffolded repo is already a descendant of its template, so
+        the merge has nothing to apply. Success therefore means BOTH that the
+        run passed AND that it opened no pull request. A PR here means the new
+        repo's tree diverges from the template in some way scaffolding did not
+        account for - worth looking at by hand.
+
+        Never throws. A broken sync does not make the repo any less created,
+        so this warns and prints where to look. The warning still lands in the
+        end-of-run tally.
+    .PARAMETER Handle
+        What Start-TemplateSync returned. $null means the dispatch failed.
+    .PARAMETER TimeoutSeconds
+        How long to wait for the run to finish. The workflow is a checkout,
+        a fetch and a diff, so it is normally well under a minute.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$OwnerRepo,
+        [AllowNull()]$Handle,
+        [int]$TimeoutSeconds = 300,
+        [int]$PollSeconds = 5
+    )
+    if (-not $Handle) { return }
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $runId = $null
+
+    # The run does not exist the instant the dispatch returns.
+    Write-Detail 'waiting for the run to appear'
+    while (-not $runId -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds $PollSeconds
+        $now = Get-WorkflowRunId -OwnerRepo $OwnerRepo `
+            -Workflow 'template-sync.yml'
+        $runId = @($now | Where-Object { $_ -notin $Handle.PriorRunId }) |
+            Select-Object -First 1
+    }
+    if (-not $runId) {
+        Write-Warn 'Template Sync did not start within the timeout'
+        Write-Detail "check https://github.com/$OwnerRepo/actions"
+        return
+    }
+
+    $runUrl = "https://github.com/$OwnerRepo/actions/runs/$runId"
+    Write-Detail "run $runId - waiting for it to finish"
+
+    $status = ''
+    $conclusion = ''
+    while ((Get-Date) -lt $deadline) {
+        $ghArgs = @(
+            'run', 'view', $runId
+            '--repo', $OwnerRepo
+            '--json', 'status,conclusion'
+            '--jq', '.status + "|" + (.conclusion // "")'
+        )
+        $raw = (& gh @ghArgs 2>$null | Out-String).Trim()
+        $global:LASTEXITCODE = 0
+        if ($raw -match '^(?<s>[^|]*)\|(?<c>.*)$') {
+            $status = $Matches['s']
+            $conclusion = $Matches['c']
+        }
+        if ($status -eq 'completed') { break }
+        Start-Sleep -Seconds $PollSeconds
+    }
+
+    if ($status -ne 'completed') {
+        Write-Warn "Template Sync was still $status after ${TimeoutSeconds}s"
+        Write-Detail $runUrl
+        return
+    }
+    if ($conclusion -ne 'success') {
+        Write-Warn "Template Sync finished as '$conclusion' - needs a look"
+        Write-Detail $runUrl
+        return
+    }
+
+    # Success criterion #2: it should have found nothing to sync.
+    $ghArgs = @(
+        'pr', 'list'
+        '--repo', $OwnerRepo
+        '--head', 'template-sync'
+        '--state', 'open'
+        '--json', 'number,title'
+        '--jq', '.[] | "#\(.number) \(.title)"'
+    )
+    $prs = @(& gh @ghArgs 2>$null | Where-Object { $_ })
+    $global:LASTEXITCODE = 0
+
+    if ($prs) {
+        Write-Warn "Template Sync opened $($prs.Count) pull request(s)"
+        Write-Detail 'a fresh repo should have nothing to sync; review these:'
+        foreach ($pr in $prs) { Write-Detail $pr }
+        Write-Detail "https://github.com/$OwnerRepo/pulls"
+        return
+    }
+
+    Write-Ok 'Template Sync ran clean, with nothing to sync'
+    Write-Detail $runUrl
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -2090,11 +2190,13 @@ Export-ModuleMember -Function @(
     'Update-Readme'
     'Set-TemplateSyncConfig'
     'Remove-ScriptsFolder'
-    'Add-GitExclude'
+
     'Write-WorkspaceFile'
     'Start-VSCode'
     'Write-SettingsFile'
     'Invoke-StagedCommit'
     'Push-Repo'
     'Start-TemplateSync'
+    'Wait-TemplateSync'
+    'Get-WorkflowRunId'
 )

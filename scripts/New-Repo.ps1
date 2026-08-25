@@ -290,7 +290,10 @@ Enable-Codeql -OwnerRepo $ownerRepo   # only now does the repo have content
 
 Write-Step '10' 'Initialize Template Sync'
 if ((Get-ChangeCount) -gt 0) {
-    Start-TemplateSync -OwnerRepo $ownerRepo
+    # A fresh repo is already a descendant of its template, so a clean run
+    # finds nothing to sync. A pull request here means something is off.
+    $sync = Start-TemplateSync -OwnerRepo $ownerRepo
+    Wait-TemplateSync -OwnerRepo $ownerRepo -Handle $sync
 }
 else {
     Write-Skip 'Nothing changed this run - Template Sync is already initialized'
@@ -301,11 +304,8 @@ else {
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '11' 'Set up the VS Code workspace'
-# Exclude BEFORE creating:
-# if the run dies between the two,
-# an unexcluded workspace file would be committed,
-# and then synced to every descendant.
-Add-GitExclude -RepoPath $targetPath -Pattern "$repo.code-workspace"
+# The workspace file is already ignored by the inherited .gitignore,
+# so it never reaches a commit and never syncs to a descendant.
 
 # The chain is the source template plus every ancestor cloned locally,
 # nearest first.
