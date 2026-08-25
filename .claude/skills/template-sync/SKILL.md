@@ -13,8 +13,9 @@ allowed-tools: Read Grep Glob Bash
 ---
 
 Template Sync merges the parent template's `main` into a `template-sync`
-branch and opens a PR. Read `scripts/README.md` for how the chain fits
-together before resolving anything.
+branch and opens a PR. Read [docs/TemplateChain.md][chainFile] first — it has
+the model and the full ownership list, and unlike `scripts/`, it is present in
+leaf repos too.
 
 ## 1. Find out what it wants to change
 
@@ -53,7 +54,9 @@ own customizations or drifts from its template.
   that this repo customized something it should not have.
 
 Resolve locally: check out the branch, fix the markers, and verify before
-pushing. Never resolve by taking one whole side blindly.
+pushing. Never resolve by taking one whole side blindly. The authoritative
+version of this list is in [docs/TemplateChain.md][chainFile] — if the two
+disagree, that one wins.
 
 ## 3. Verify before merging
 
@@ -77,3 +80,7 @@ Read the run: `gh run view <id> --log-failed`. The usual causes are a
 `TEMPLATE_REPO_URL` pointing at the wrong repo (it is inherited verbatim, so
 a level-2 repo can end up syncing from its grandparent), a ruleset blocking
 the push of the `template-sync` branch, or the parent having no `main`.
+
+<!-- Source Code URIs (alphabetical by file hierarchy) -->
+
+[chainFile]: ../../../docs/TemplateChain.md

@@ -73,6 +73,9 @@ flowchart TB
   templateC --> repo5
 ```
 
+For how a change travels between these repos, and who owns which file when
+a sync conflicts, see [Template Chain][chainFile].
+
 #### Table of Contents <!-- omit from toc -->
 
 - [Description of Files in This Template Repo](#description-of-files-in-this-template-repo)
@@ -130,10 +133,10 @@ because most files need repo-specific customization.
 | File                                  | Description                                      |
 | :------------------------------------ | :----------------------------------------------- |
 | 📁[.claude/][claudeFolder]             | [AI agents and skills][aiFile]                   |
+| 📁[.github/agents/][ghAgentsFolder]    | Copilot mirrors of [those agents][aiFile]        |
 | 📁[.vscode/][vsCodeFolder]             | Contains VSCode settings                         |
 | 📁[docs/][docsFolder]                  | Contains documentation                           |
 | 📁[scripts/][scriptsFolder]            | [Repo scaffolding scripts][scriptsFile]          |
-
 | 📄[.editorconfig][editorConfigFile]    | [Styleguide rule definitions][styleguideFile]    |
 | 📄[.gitattributes][gitAttributesFile]  | Built using [scaffolding][ghGitAttributes]       |
 | 📄[.gitignore][gitIgnoreFile]          | Built using [scaffolding][ghGitIgnore]           |
@@ -144,6 +147,7 @@ because most files need repo-specific customization.
 <!-- Source Code URIs (alphabetical by file hierarchy) -->
 
 [githubFolder]: ./.github/
+[ghAgentsFolder]: ./.github/agents/
 [instructionsFolder]: ./.github/instructions/
 [issueFormsFolder]: ./.github/ISSUE_TEMPLATE/
 [issueChooserFile]: ./.github/ISSUE_TEMPLATE/config.yml
@@ -159,6 +163,7 @@ because most files need repo-specific customization.
 [vsCodeFolder]: ./.vscode/
 [docsFolder]: ./docs/
 [aiFile]: ./docs/AiInstructions.md
+[chainFile]: ./docs/TemplateChain.md
 [styleguideFile]: ./docs/Styleguide.md
 [styleguideFile-commit]: ./docs/Styleguide.md#commit-messages
 [scriptsFolder]: ./scripts/

@@ -68,11 +68,13 @@ if the repo's `origin` owner doesn't match it.
 Scaffolding produces a complete, known-good baseline and stops. Its work is grouped into
 four commits, each with a single concern, so the history stays readable:
 
-1. `chore: remove template-only files` — deletes the files that belong only to the base repo,
-   de-links their rows in `README.md` (and removes `scripts/` for a code repo).
+1. `chore: remove template-only files` — deletes the files that belong only to the base repo
+   and de-links their rows in `README.md`. For a code repo it instead removes `scripts/` and
+   replaces the whole README with a normal project one, since a leaf should document itself
+   rather than the chain it came from.
 2. `chore: retarget template references` — rewrites `owner/parent` → `owner/this-repo` in
    `CONTRIBUTING.md`, `SECURITY.md`, `SUPPORT.md` and `.github/ISSUE_TEMPLATE/*`, and
-   moves the README diagram's highlight off the base repo onto this repo's own tier.
+   moves the README diagram's highlight off the base repo onto the template row.
 3. `ci: enable the template sync schedule` — points `TEMPLATE_REPO_URL` at the **immediate
    parent** and switches the nightly schedule on.
 4. `chore: customize repo settings` — writes `.github/settings.yml`, and for a private repo
@@ -190,28 +192,13 @@ which agent or skill belongs at which layer.
 ### Settings inheritance
 
 Each new repo's `settings.yml` gets `_extends: <the repo it was derived from>`,
-so it only overrides what differs (description, homepage, topics, name).
+so it only overrides what differs — description, homepage, topics, name, and
+visibility when private.
 
-The Settings app resolves `_extends` **recursively** — it follows each parent's own
-`_extends` until one has none — so a repo derived from `.template-dotnet` also inherits
-everything from `.github` through the chain. Nearest layer wins.
-
-Things to know when editing a shared layer:
-
-- **Editing a parent does _not_ re-sync its children.** The Settings app only runs when a
-  push touches *that repo's own* `.github/settings.yml`. After changing a shared layer,
-  each downstream repo needs its own `settings.yml` touched to pick the change up.
-- Inheritance is **additive only** — a child can't remove a label or ruleset
-  contributed by an ancestor. Keep shared layers minimal.
-- Same-named `rulesets` merge, but their **inner** arrays (`rules`, `bypass_actors`,
-  `conditions.ref_name.include`) concatenate without dedupe. Define each ruleset in
-  exactly **one** layer, or give child rulesets distinct names.
-- If a layer in the chain is **unreachable** (renamed, or private and not visible to the
-  Settings app install), the chain **truncates silently** — no error, just partially
-  applied settings. Keep every layer accessible to the app.
-- The scripts emit a **bare** `_extends` (same owner). Don't hand-edit one to point at
-  another owner: every hop resolves against *this* repo's owner rather than the parent's,
-  so a cross-owner chain silently truncates unless each level spells out `owner/repo`.
+The rest of the model, including the recursive `_extends` resolution and the
+several ways a shared layer can surprise you, is in
+[docs/TemplateChain.md](../docs/TemplateChain.md). That document is kept in
+leaf repos too, where this folder no longer exists.
 
 ### VS Code workspace
 
@@ -269,6 +256,8 @@ Most other repo settings are applied automatically by the **Settings** GitHub Ap
 ## Alternatives considered
 
 Why this is hand-rolled PowerShell rather than an off-the-shelf scaffolder.
+[docs/TemplateChain.md](../docs/TemplateChain.md) covers the short version;
+this is the evidence.
 
 ### ❌ GitHub's native template repositories
 

@@ -1557,38 +1557,139 @@ function Update-Readme {
     Write-Ok 'De-linked the template-only files in README.md'
 }
 
+function Reset-Readme {
+    <#
+    .SYNOPSIS
+        Replaces a code repo's inherited README with an ordinary project one.
+    .DESCRIPTION
+        A template's README documents the template chain - the structure
+        diagram and the inventory of which file lives at which layer. None of
+        that means anything in a leaf repo, and an outside contributor reading
+        it learns nothing about the project. So a code repo gets a normal
+        README skeleton instead: what this is, how to start, and where the
+        community files are.
+
+        Skipped unless the README is still recognisably the template's, so a
+        re-run never overwrites the real README you wrote afterwards.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$RepoPath,
+        [Parameter(Mandatory)][string]$RepoName,
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Description,
+        [ValidateSet('Public', 'Private')][string]$Visibility = 'Public'
+    )
+    $path = Join-Path $RepoPath 'README.md'
+
+    # Two markers, either of which only a template's README carries.
+    $isTemplate = $false
+    if (Test-Path $path) {
+        $raw = Get-Content -Raw $path
+        $isTemplate =
+        $raw.Contains('Personal GitHub Repo Structure') -or
+        $raw.Contains('Description of Files in This Template Repo')
+    }
+    if (-not $isTemplate) {
+        Write-Skip 'README.md is not the template one - leaving it alone'
+        return
+    }
+
+    $summary = if ($Description) { $Description } else { 'TODO: what this is.' }
+    $contributing = if ($Visibility -eq 'Private') {
+        'This is a private project. Please contact the owner before'
+    }
+    else {
+        'Contributions are welcome. Please read'
+    }
+    $licence = if ($Visibility -eq 'Private') {
+        'All rights reserved. See [LICENSE][licenseFile].'
+    }
+    else {
+        '[MIT][licenseFile]'
+    }
+
+    $lines = @(
+        "# $RepoName <!-- omit from toc -->"
+        ''
+        $summary
+        ''
+        '#### Table of Contents <!-- omit from toc -->'
+        ''
+        '- [Getting Started](#getting-started)'
+        '- [Contributing](#contributing)'
+        '- [Support](#support)'
+        '- [License](#license)'
+        ''
+        '## Getting Started'
+        ''
+        '> TODO: how to install this, and how to use it.'
+        ''
+        '## Contributing'
+        ''
+        $contributing
+    )
+    if ($Visibility -eq 'Private') {
+        $lines += 'opening an issue or a pull request.'
+    }
+    else {
+        $lines += '[CONTRIBUTING.md][contribFile] first,'
+        $lines += 'along with the [Code of Conduct][cocFile].'
+    }
+    $lines += @(
+        ''
+        '## Support'
+        ''
+        'Need help? See [SUPPORT.md][supportFile].'
+        'To report a vulnerability, see [SECURITY.md][securityFile].'
+        ''
+        '## License'
+        ''
+        $licence
+        ''
+        '<!-- Source Code URIs (alphabetical by file hierarchy) -->'
+        ''
+        '[cocFile]: ./CODE_OF_CONDUCT.md'
+        '[contribFile]: ./CONTRIBUTING.md'
+        '[licenseFile]: ./LICENSE'
+        '[securityFile]: ./SECURITY.md'
+        '[supportFile]: ./SUPPORT.md'
+    )
+
+    $content = ($lines -join "`r`n") + "`r`n"
+    Set-Content -Path $path -Value $content -NoNewline -Encoding utf8
+    Add-Change
+    Write-Ok 'Replaced the template README with a project one'
+}
+
 function Update-ReadmeDiagram {
     <#
     .SYNOPSIS
-        Points the README's structure diagram at this repo's own tier.
+        Points the README's structure diagram at the template row.
     .DESCRIPTION
         The base .github repo highlights itself, next to the note explaining
-        what it is. A derived repo should highlight a node one row down
-        instead, so the picture reads "you are here" rather than "you are the
-        base". Which specific tier is highlighted does not matter - the point
-        is to convey the layering.
+        what it is. Every template derived from it highlights the right-most
+        template in the second row instead, next to the note about template
+        layers, so the picture reads "you are a layer" rather than "you are
+        the base". Which tier is highlighted does not matter - the point is to
+        convey the layering.
 
         Only the BASE repo's marker is ever retargeted. That makes this both
         idempotent and correct at any depth: a second-layer template inherits
         a diagram already pointing at the template row, so there is nothing
         to change, and a repo whose diagram was rewritten by hand is left
         alone.
+
+        A code repo never gets here - Reset-Readme has already replaced the
+        whole README, diagram included.
     #>
-    param(
-        [Parameter(Mandatory)][string]$RepoPath,
-        [Parameter(Mandatory)][ValidateSet('Template', 'Code')][string]$Kind
-    )
+    param([Parameter(Mandatory)][string]$RepoPath)
     $path = Join-Path $RepoPath 'README.md'
     if (-not (Test-Path $path)) {
         Write-Skip 'README.md not found'
         return
     }
 
-    # A template becomes the right-most template in the second row;
-    # a code repo becomes the leaf sitting beside it.
-    $node = if ($Kind -eq 'Template') { 'templateB' } else { 'repo1' }
     $from = 'class github current'
-    $to = "class $node current"
+    $to = 'class templateB current'
 
     $raw = Get-Content -Raw $path
     if (-not $raw.Contains($from)) {
@@ -1597,7 +1698,8 @@ function Update-ReadmeDiagram {
     }
 
     Set-Content -Path $path -Value $raw.Replace($from, $to) -NoNewline
-    Write-Ok "Retargeted the README diagram at '$node'"
+    Add-Change
+    Write-Ok 'Retargeted the README diagram at the template row'
 }
 
 function Set-RepoLicense {
@@ -2487,6 +2589,7 @@ Export-ModuleMember -Function @(
     'Update-RepoReference'
     'Update-Readme'
     'Update-ReadmeDiagram'
+    'Reset-Readme'
     'Set-RepoLicense'
     'Set-TemplateSyncConfig'
     'Remove-ScriptsFolder'

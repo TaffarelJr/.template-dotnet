@@ -232,8 +232,17 @@ Invoke-GatedCommit -RepoPath $targetPath `
     -Paths $paths `
     -Body {
     Remove-TemplateOnlyFile -RepoPath $targetPath
-    if ($Kind -eq 'Code') { Remove-ScriptsFolder -RepoPath $targetPath }
-    Update-Readme           -RepoPath $targetPath
+    if ($Kind -eq 'Code') {
+        # A leaf documents itself, not the chain it came from.
+        Remove-ScriptsFolder -RepoPath $targetPath
+        Reset-Readme -RepoPath $targetPath `
+            -RepoName $repo `
+            -Description $Description `
+            -Visibility $Visibility
+    }
+    else {
+        Update-Readme -RepoPath $targetPath
+    }
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -255,7 +264,7 @@ Invoke-GatedCommit -RepoPath $targetPath `
     Update-RepoReference -RepoPath $targetPath `
         -OldOwnerRepo $ctx.SourceOwnerRepo `
         -NewOwnerRepo $ownerRepo
-    Update-ReadmeDiagram -RepoPath $targetPath -Kind $Kind
+    Update-ReadmeDiagram -RepoPath $targetPath
 }
 
 #───────────────────────────────────────────────────────────────────────────────

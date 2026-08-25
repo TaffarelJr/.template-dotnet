@@ -23,6 +23,7 @@ so a rule never has to be written twice.
 | 📁[.github/instructions/][instructionsFolder]    | Copilot (all surfaces), agents that follow a link   | Rules scoped to one file type         |
 | 📄[.github/copilot-instructions.md][copilotFile] | Copilot                                             | A pointer, for surfaces that need one |
 | 📁[.claude/agents/][agentsFolder]                | Claude Code, VS Code Copilot                        | Specialist reviewers, read-only       |
+| 📁[.github/agents/][ghAgentsFolder]              | Copilot cloud agent, VS Code                        | Thin mirrors of the above             |
 | 📁[.claude/skills/][skillsFolder]                | Claude Code, all Copilot surfaces                   | Procedures, loaded only when used     |
 | 📁[docs/][docsFolder]                            | Humans; agents on demand                            | The reasoning behind the rules        |
 
@@ -94,10 +95,11 @@ review and very little else.
 | :---- | :--- |
 | `security-reviewer` | Injection, secrets, authz, unsafe input, dependencies |
 | `perf-reviewer` | Complexity, allocations, N+1, blocking async |
-| `quality-reviewer` | This repo's conventions, naming, comments, tests |
+| `quality-reviewer` | Design and craft: SOLID, coupling, domain modelling |
+| `test-reviewer` | Coverage of new paths, and whether the tests are any good |
 | `docs-reviewer` | Whether the docs are still true after the change |
 
-All four are read-only, by `tools: Read, Grep, Glob, Bash` plus
+All five are read-only, by `tools: Read, Grep, Glob, Bash` plus
 `disallowedTools: Write, Edit`. That restriction is the point: a reviewer that
 can edit will quietly fix what it found instead of telling you, and you lose
 the review.
@@ -105,6 +107,44 @@ the review.
 `docs-reviewer` earns its place in a repo that documents itself this heavily.
 A rename touches the README tables, `scripts/README.md`, comment-based help
 and the instruction files, and stale documentation is worse than none.
+
+`test-reviewer` exists because `quality-reviewer` is about design, not
+verification. Folding tests into it left them reviewed by nobody in
+particular, which is how test quality quietly rots.
+
+### Five reviewers is the ceiling, not the default
+
+`/review` sizes itself to the change: a two-file, fifty-line diff is read
+inline with no subagents at all; a larger one gets only the lenses the diff
+implicates; all five run before a pull request, or when the change touches
+authentication, crypto, input parsing, secrets, workflow permissions, or a
+public API. It states which reviewers it ran and which it skipped, so the
+depth is visible and can be corrected.
+
+That matters because parallel subagents cost roughly fifteen times a plain
+conversation. The cost is worth it for a release candidate and ridiculous for
+a renamed variable.
+
+### Copilot parity
+
+Skills need nothing: `.claude/skills/` is read by Claude Code **and** every
+Copilot surface, including code review.
+
+Agents need a little. `.claude/agents/` covers Claude Code and VS Code, but
+the Copilot **cloud** agent only reads `.github/agents/*.agent.md`. So each
+reviewer has a thin mirror there, whose body points back at the `.claude/`
+file as the single source of truth. Only the `description` is duplicated,
+because that field is the routing table and has to be inline — keep the two
+in step, and `docs-reviewer` will notice if they drift.
+
+The mirrors declare `tools: ['read', 'search', 'execute']`. Copilot has no
+deny-list, so read-only comes from `edit` simply being absent — which is a
+stronger guarantee than the allow-plus-deny pair on the Claude side. Claude's
+own tool names are accepted there as aliases, but the canonical ones are
+clearer about what is going on.
+
+Custom agents are **not** used by Copilot code review. A check that has to
+run there belongs in a skill.
 
 ### What deliberately isn't an agent
 
@@ -173,10 +213,6 @@ Never copy rules into it.
 
 ## Known limits
 
-- **Custom agents do not reach Copilot code review.** Skills do, so a check
-  that has to run there belongs in a skill. A `.github/agents/*.agent.md`
-  mirror would add the Copilot cloud coding agent, and is worth generating
-  from these sources if that ever comes into use.
 - **Front matter globs are Copilot's mechanism.**
   Claude Code's equivalent is `.claude/rules/*.md` with a `paths:` list,
   which VS Code Copilot also honours.
@@ -194,6 +230,7 @@ Never copy rules into it.
 
 [agentsFolder]: ../.claude/agents/
 [skillsFolder]: ../.claude/skills/
+[ghAgentsFolder]: ../.github/agents/
 [instructionsFolder]: ../.github/instructions/
 [copilotFile]: ../.github/copilot-instructions.md
 [docsFolder]: ./
