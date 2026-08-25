@@ -14,6 +14,21 @@ The reasoning behind each rule is in [docs/Styleguide.md][styleguideFile].
 - Read the rule file in [.github/instructions/][instructionsFolder]
   that matches the file type you are about to edit.
 
+## Use the reviewers and the procedures
+
+Specialist reviewers live in [.claude/agents/][agentsFolder] and procedures in
+[.claude/skills/][skillsFolder]. Every tool here discovers them by itself.
+What none of them can discover is when to reach for one:
+
+- Run `/review` **before** opening a pull request, not after.
+  It sizes itself to the change, so a small diff costs almost nothing.
+- Use `/commit` rather than composing a message by hand,
+  and `/pr` rather than writing a description from memory.
+- The reviewers are **read-only by design**. They report; you decide what to
+  change. Never ask one to fix what it found.
+
+[docs/AiInstructions.md][aiFile] explains the whole layout.
+
 ## Never commit to `main`
 
 Create a descriptive branch (for example, `awesome-feature-name`),
@@ -80,7 +95,10 @@ Decorative emoji are not.
 
 <!-- Source Code URIs (alphabetical by file hierarchy) -->
 
+[agentsFolder]: ./.claude/agents/
+[skillsFolder]: ./.claude/skills/
 [instructionsFolder]: ./.github/instructions/
+[aiFile]: ./docs/AiInstructions.md
 [ccFile]: ./docs/ConventionalCommits.md
 [rulersFile]: ./docs/VerticalRulers.md
 [styleguideFile]: ./docs/Styleguide.md
