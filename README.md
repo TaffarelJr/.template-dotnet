@@ -95,7 +95,7 @@ because most files need repo-specific customization.
 | :---------------------------------- | :-----------------------------: | :-----------------------------: | :----------------------- |
 | 📁[.github/][githubFolder]           |                                 |                                 |                          |
 | &nbsp;├─📄[CODEOWNERS][codeOwnFile]  |               N/A               |                ✅                |                          |
-| &nbsp;└─📄FUNDING.yml |                ✅                |                                 |                          |
+| &nbsp;└─📄[FUNDING.yml][fundingFile] |                ✅                |                                 |                          |
 | 📄[CODE_OF_CONDUCT.md][cocFile]      |                                 |                ✅                | Linked to by other files |
 | 📄[CONTRIBUTING.md][contribFile]     |                                 |                ✅                | Links to other files     |
 | 📄GOVERNANCE.md                      |                —                |                —                | Not implemented          |
@@ -109,8 +109,9 @@ because most files need repo-specific customization.
 | :--------------------------------------------------------------- | :-----------------------------: | :-----------------------------: | :---------------------------------------------- |
 | 📁[.github/][githubFolder]                                        |                                 |                                 |                                                 |
 | &nbsp;├─📁DISCUSSION_TEMPLATE/                                    |                —                |                —                | Not implemented                                 |
+| &nbsp;├─📁[instructions/][instructionsFolder]                     |               N/A               |                ➕                | [Path-scoped AI instructions][aiFile]           |
 | &nbsp;├─📁[ISSUE_TEMPLATE/][issueFormsFolder]                     |                                 |                ✅                | Contains [GitHub Issue forms][ghIssueForms]     |
-| &nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└─📄config.yml |                ✅                |                                 | [GitHub Issue template chooser][ghIssueChooser] |
+| &nbsp;│&nbsp;&nbsp;&nbsp;&nbsp;└─📄[config.yml][issueChooserFile] |                ✅                |                                 | [GitHub Issue template chooser][ghIssueChooser] |
 | &nbsp;├─📄[copilot-instructions.md][copilotFile]                  |               N/A               |                ✅                | [Copilot configuration][ghCopilot]              |
 | &nbsp;├─📄[dependabot.yml][dependabotFile]                        |               N/A               |                ✅                | [Dependabot configuration][ghDependabot]        |
 | &nbsp;├─📄[pull_request_template.md][prTemplateFile]              |                                 |                ✅                | [GitHub Pull Request template][ghPRTemplate]    |
@@ -126,36 +127,49 @@ because most files need repo-specific customization.
 
 ### Other Files
 
-| File                                 | Description                                      |
-| :----------------------------------- | :----------------------------------------------- |
-| 📁[.vscode/][vsCodeFolder]            | Contains VSCode settings                         |
-| 📁[docs/][docsFolder]                 | Contains documentation                           |
-| 📄[\_checklist.md][checklistFile]     | New template repo checklist                      |
-| 📄[.editorconfig][editorConfigFile]   | [Styleguide rule definitions][styleguideFile]    |
-| 📄[.gitattributes][gitAttributesFile] | Built using [scaffolding][ghGitAttributes]       |
-| 📄[.gitignore][gitIgnoreFile]         | Built using [scaffolding][ghGitIgnore]           |
-| 📄[.gitmessage][gitMessageFile]       | [Commit message template][styleguideFile-commit] |
+| File                                  | Description                                      |
+| :------------------------------------ | :----------------------------------------------- |
+| 📁[.claude/][claudeFolder]             | [AI agents and skills][aiFile]                   |
+| 📁[.vscode/][vsCodeFolder]             | Contains VSCode settings                         |
+| 📁[docs/][docsFolder]                  | Contains documentation                           |
+| 📁[scripts/][scriptsFolder]            | [Repo scaffolding scripts][scriptsFile]          |
+| 📄[\_checklist.md][checklistFile]      | New template repo checklist                      |
+| 📄[.editorconfig][editorConfigFile]    | [Styleguide rule definitions][styleguideFile]    |
+| 📄[.gitattributes][gitAttributesFile]  | Built using [scaffolding][ghGitAttributes]       |
+| 📄[.gitignore][gitIgnoreFile]          | Built using [scaffolding][ghGitIgnore]           |
+| 📄[.gitmessage][gitMessageFile]        | [Commit message template][styleguideFile-commit] |
+| 📄[AGENTS.md][agentsFile]              | [AI agent instructions][aiFile]                  |
+| 📄[CLAUDE.md][claudeFile]              | Imports [AGENTS.md][agentsFile] for Claude Code  |
 
 <!-- Source Code URIs (alphabetical by file hierarchy) -->
 
 [githubFolder]: ./.github/
+[instructionsFolder]: ./.github/instructions/
 [issueFormsFolder]: ./.github/ISSUE_TEMPLATE/
+[issueChooserFile]: ./.github/ISSUE_TEMPLATE/config.yml
 [workflowFolder]: ./.github/workflows/
 [syncWorkflow]: ./.github/workflows/template-sync.yml
 [codeOwnFile]: ./.github/CODEOWNERS
 [copilotFile]: ./.github/copilot-instructions.md
 [dependabotFile]: ./.github/dependabot.yml
+[fundingFile]: ./.github/FUNDING.yml
 [prTemplateFile]: ./.github/pull_request_template.md
 [settingsFile]: ./.github/settings.yml
+[claudeFolder]: ./.claude/
 [vsCodeFolder]: ./.vscode/
 [docsFolder]: ./docs/
+[aiFile]: ./docs/AiInstructions.md
 [styleguideFile]: ./docs/Styleguide.md
 [styleguideFile-commit]: ./docs/Styleguide.md#commit-messages
+[scriptsFolder]: ./scripts/
+[scriptsFile]: ./scripts/README.md
 [checklistFile]: ./_checklist.md
 [editorConfigFile]: ./.editorconfig
 [gitAttributesFile]: ./.gitattributes
 [gitIgnoreFile]: ./.gitignore
 [gitMessageFile]: ./.gitmessage
+[agentsFile]: ./AGENTS.md
+[claudeFile]: ./CLAUDE.md
 [cocFile]: ./CODE_OF_CONDUCT.md
 [contribFile]: ./CONTRIBUTING.md
 [licenseFile]: ./LICENSE

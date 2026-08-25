@@ -282,6 +282,18 @@ function Invoke-Gh {
 # Input resolution (command line OR prompt)
 #───────────────────────────────────────────────────────────────────────────────
 
+# One regex for a repo-name slug, so Format-Slug and every prompt that
+# validates one cannot drift apart.
+$script:SlugPattern = '^[a-z0-9]+(-[a-z0-9]+)*$'
+
+function Get-SlugPattern {
+    <#
+    .SYNOPSIS
+        Returns the regex a repo-name slug must match.
+    #>
+    return $script:SlugPattern
+}
+
 function Format-Slug {
     <#
     .SYNOPSIS
@@ -294,17 +306,83 @@ function Format-Slug {
     )
 
     $slug = $Value.Trim().ToLowerInvariant()
-    if ($slug -notmatch '^[a-z0-9]+(-[a-z0-9]+)*$') {
+    if ($slug -notmatch $script:SlugPattern) {
         throw "$Label must be kebab-case (letters/digits/hyphens): '$slug'"
     }
 
     return $slug
 }
 
+function Format-TopicList {
+    <#
+    .SYNOPSIS
+        Normalises a comma-separated topic list into what GitHub accepts.
+    .DESCRIPTION
+        GitHub topics are lowercase, may hold only letters, digits and
+        hyphens, must start with a letter or digit, and cap at 50 characters.
+        An invalid one makes the Settings app drop the whole list without
+        saying so, so this trims, lowercases, de-duplicates, and rejects
+        anything still malformed.
+    #>
+    param(
+        [Parameter(Mandatory)][AllowEmptyString()][string]$Value,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $topics = @($Value -split ',' |
+        ForEach-Object { $_.Trim().ToLowerInvariant() } |
+        Where-Object { $_ })
+    $topics = @($topics | Select-Object -Unique)
+
+    foreach ($topic in $topics) {
+        if ($topic.Length -gt 50) {
+            throw "$Label - '$topic' is over 50 characters"
+        }
+        if ($topic -notmatch '^[a-z0-9][a-z0-9-]*$') {
+            throw ("$Label - '$topic' must be lowercase letters, digits " +
+                'and hyphens, starting with a letter or digit')
+        }
+    }
+
+    return ($topics -join ', ')
+}
+
+function Get-InputError {
+    <#
+    .SYNOPSIS
+        Returns why a value is unacceptable, or $null when it is fine.
+    .DESCRIPTION
+        Split out from Resolve-Input so the same rules apply to a value
+        supplied on the command line, a prompted one, and a default.
+    .PARAMETER Requirement
+        Plain-English version of -Pattern, used in the message. Regexes
+        make poor error messages.
+    #>
+    param(
+        [AllowEmptyString()][string]$Value,
+        [string[]]$Choice,
+        [string]$Pattern,
+        [string]$Requirement,
+        [bool]$Require
+    )
+    if (-not $Value) {
+        if ($Require) { return 'is required' }
+        return $null
+    }
+    if ($Choice -and $Value -notin $Choice) {
+        return "must be one of: $($Choice -join ', ')"
+    }
+    if ($Pattern -and $Value -notmatch $Pattern) {
+        if ($Requirement) { return $Requirement }
+        return "must match $Pattern"
+    }
+    return $null
+}
+
 function Resolve-Input {
     <#
     .SYNOPSIS
-        Returns a value that may come from the command line or a prompt.
+        Returns a validated value from the command line, a prompt, or a default.
     .DESCRIPTION
         - If the caller passed the parameter
           (tracked in $Bound = $PSBoundParameters),
@@ -314,6 +392,22 @@ function Resolve-Input {
           returns $Default without prompting, so unattended runs never block.
         - Otherwise prompts. A non-empty -Default is shown as [default],
           and ENTER accepts it. -Secret prompts without echo, for tokens.
+
+        Validation applies to all three, but the response differs: an
+        interactive prompt says what is wrong and asks again, while a bad
+        command-line value or default throws, because there is nobody to ask.
+        Everything except a secret is trimmed, and a -Choice match is
+        returned in the casing the choice list declares.
+    .PARAMETER Choice
+        Accept only these values, case-insensitively.
+    .PARAMETER Pattern
+        Regex the value must match when it is not empty.
+    .PARAMETER Requirement
+        Plain-English version of -Pattern, for the error message.
+    .PARAMETER Require
+        Reject an empty value. Without it, empty is allowed and skips the
+        other checks - which is what an optional setting like a homepage
+        wants.
     #>
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -321,19 +415,64 @@ function Resolve-Input {
         $Value,
         [Parameter(Mandatory)][string]$Prompt,
         [string]$Default = '',
+        [string[]]$Choice,
+        [string]$Pattern,
+        [string]$Requirement,
+        [switch]$Require,
         [switch]$Secret
     )
-    if ($Bound.ContainsKey($Name)) { return [string]$Value }
-    if ($script:SkipManualPrompts) { return $Default }
+    $rules = @{
+        Choice      = $Choice
+        Pattern     = $Pattern
+        Requirement = $Requirement
+        Require     = $Require.IsPresent
+    }
+
+    # Canonical casing, so -Visibility private yields 'Private'.
+    $canonical = {
+        param($Result)
+        if ($Choice -and $Result) {
+            $match = @($Choice | Where-Object { $_ -eq $Result })
+            if ($match) { return $match[0] }
+        }
+        return $Result
+    }
 
     if ($Secret) {
+        if ($Bound.ContainsKey($Name)) { return [string]$Value }
+        if ($script:SkipManualPrompts) { return $Default }
         $sec = Read-Host -AsSecureString $Prompt
         return [System.Net.NetworkCredential]::new('', $sec).Password
     }
-    $label = if ($Default -ne '') { "$Prompt [$Default]" } else { $Prompt }
-    $entered = Read-Host $label
-    if ([string]::IsNullOrEmpty($entered)) { return $Default }
-    return $entered
+
+    if ($Bound.ContainsKey($Name)) {
+        $result = ([string]$Value).Trim()
+        $err = Get-InputError -Value $result @rules
+        if ($err) { throw "-$Name $err (got '$result')" }
+        return (& $canonical $result)
+    }
+
+    if ($script:SkipManualPrompts) {
+        $result = $Default.Trim()
+        $err = Get-InputError -Value $result @rules
+        if ($err) { throw "-$Name was not supplied, and its default $err" }
+        return (& $canonical $result)
+    }
+
+    $label = $Prompt
+    if ($Choice) { $label += " ($($Choice -join '/'))" }
+    if ($Default -ne '') { $label += " [$Default]" }
+
+    while ($true) {
+        $entered = Read-Host $label
+        $result = if ([string]::IsNullOrEmpty($entered)) { $Default }
+        else { $entered }
+        $result = $result.Trim()
+
+        $err = Get-InputError -Value $result @rules
+        if (-not $err) { return (& $canonical $result) }
+        Write-Warn "$Name $err"
+    }
 }
 
 function Confirm-Proceed {
@@ -383,7 +522,10 @@ function Register-ManualSetting {
     .SYNOPSIS
         Queues the repo settings GitHub only exposes in the web UI (no REST API).
     #>
-    param([Parameter(Mandatory)][string]$OwnerRepo)
+    param(
+        [Parameter(Mandatory)][string]$OwnerRepo,
+        [ValidateSet('Public', 'Private')][string]$Visibility = 'Public'
+    )
     # NB: release immutability is NOT listed here - it has a real API now,
     # handled by Enable-ReleaseImmutability, which re-adds it to this
     # list only if the call fails.
@@ -414,13 +556,14 @@ function Register-ManualSetting {
         -Title 'Enable grouped security updates' `
         -Steps $steps
 
-    $steps = @(
-        "$url/security_analysis  →  enable 'Dependency graph'"
-        'Public repos always have it on; the toggle is not offered.'
-    )
-    Add-ManualItem -Category $cat `
-        -Title 'Enable the Dependency graph — only if this repo is PRIVATE' `
-        -Steps $steps
+    # A public repo always has the dependency graph on, with no toggle,
+    # so only a private one needs asking about.
+    if ($Visibility -eq 'Private') {
+        $steps = @("$url/security_analysis  →  enable 'Dependency graph'")
+        Add-ManualItem -Category $cat `
+            -Title 'Enable the Dependency graph' `
+            -Steps $steps
+    }
 
     $steps = @(
         "https://github.com/$OwnerRepo"
@@ -845,18 +988,35 @@ function Reset-GhAccount {
 function New-GitHubRepo {
     <#
     .SYNOPSIS
-        Creates an empty public repo. No-op if it already exists.
+        Creates an empty repo. No-op if it already exists.
+    .DESCRIPTION
+        An existing repo keeps whatever visibility it already has: changing
+        that is not something a scaffolding re-run should do behind your back.
+        settings.yml is where visibility is declared from then on.
     #>
-    param([Parameter(Mandatory)][string]$OwnerRepo)
-    gh repo view $OwnerRepo --json name 2>$null | Out-Null
+    param(
+        [Parameter(Mandatory)][string]$OwnerRepo,
+        [ValidateSet('Public', 'Private')][string]$Visibility = 'Public'
+    )
+    $actual = gh repo view $OwnerRepo --json visibility --jq '.visibility' `
+        2>$null
     if ($LASTEXITCODE -eq 0) {
-        Write-Skip "Repo $OwnerRepo already exists"
+        $global:LASTEXITCODE = 0
+        $actual = ($actual | Out-String).Trim().ToLowerInvariant()
+        Write-Skip "Repo $OwnerRepo already exists ($actual)"
+        if ($actual -and $actual -ne $Visibility.ToLowerInvariant()) {
+            Write-Warn ("Existing repo is $actual, but -Visibility says " +
+                "$Visibility - left as-is")
+        }
         return
     }
+    $global:LASTEXITCODE = 0
+
+    $flag = "--$($Visibility.ToLowerInvariant())"
     Invoke-Gh -What "Creating $OwnerRepo" `
-        -Arguments @('repo', 'create', $OwnerRepo, '--public') | Out-Null
+        -Arguments @('repo', 'create', $OwnerRepo, $flag) | Out-Null
     Add-Change
-    Write-Ok "Created empty public repo $OwnerRepo"
+    Write-Ok "Created empty $($Visibility.ToLowerInvariant()) repo $OwnerRepo"
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -910,11 +1070,26 @@ function Enable-PrivateVulnReporting {
         Write-Skip 'Private vulnerability reporting already enabled'
         return
     }
-    $ghArgs = @('api', '--method', 'PUT', $endpoint, '--silent')
-    Invoke-Gh -What 'Enabling private vulnerability reporting' `
-        -Arguments $ghArgs | Out-Null
-    Add-Change
-    Write-Ok "Enabled private vulnerability reporting"
+    # Tolerated rather than asserted: GitHub 422s when the repo is not
+    # eligible, and losing one setting should not fail an otherwise good run.
+    gh api --method PUT $endpoint --silent 2>$null | Out-Null
+    $ok = ($LASTEXITCODE -eq 0)
+    $global:LASTEXITCODE = 0
+    if ($ok) {
+        Add-Change
+        Write-Ok 'Enabled private vulnerability reporting'
+        return
+    }
+
+    Write-Warn ('Could not enable private vulnerability reporting - ' +
+        'added to the checklist')
+    $steps = @(
+        "https://github.com/$OwnerRepo/settings/security_analysis"
+        "enable 'Private vulnerability reporting'"
+    )
+    Add-ManualItem -Category 'GitHub settings — web UI only (no API)' `
+        -Title 'Enable private vulnerability reporting' `
+        -Steps $steps
 }
 
 function Set-CodecovSecret {
@@ -1465,7 +1640,8 @@ function Write-SettingsFile {
         [Parameter(Mandatory)][string]$ExtendsRepo,
         [Parameter(Mandatory)][string]$Description,
         [string]$Homepage,
-        [Parameter(Mandatory)][string]$Topics
+        [Parameter(Mandatory)][string]$Topics,
+        [ValidateSet('Public', 'Private')][string]$Visibility = 'Public'
     )
     $settingsPath = Join-Path $RepoPath '.github/settings.yml'
     if (Test-Path $settingsPath) {
@@ -1516,6 +1692,13 @@ function Write-SettingsFile {
         '  # The name of the repo'
         "  name: $Name"
     ) | ForEach-Object { $lines.Add($_) }
+    # Only stated when it differs from the inherited default, so a repo that
+    # is meant to be public never carries a line that could flip it.
+    if ($Visibility -eq 'Private') {
+        $lines.Add('')
+        $lines.Add('  # Visibility')
+        $lines.Add('  private: true')
+    }
     if ($Kind -eq 'Code') {
         @(
             ''
@@ -2154,6 +2337,9 @@ Export-ModuleMember -Function @(
     'Show-Summary'
     'Show-Failure'
     'Format-Slug'
+    'Format-TopicList'
+    'Get-SlugPattern'
+    'Get-InputError'
     'Confirm-Proceed'
     'Invoke-GatedCommit'
     'Invoke-LayerModule'

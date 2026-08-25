@@ -9,6 +9,7 @@ so a rule never has to be written twice.
 - [Layout](#layout)
 - [Why AGENTS.md is the canonical file](#why-agentsmd-is-the-canonical-file)
 - [What belongs where](#what-belongs-where)
+- [Agents and skills](#agents-and-skills)
 - [Adding a file type](#adding-a-file-type)
 - [Adding a tool](#adding-a-tool)
 - [Known limits](#known-limits)
@@ -21,6 +22,8 @@ so a rule never has to be written twice.
 | 📄[CLAUDE.md][claudeFile]                        | Claude Code, VS Code Copilot                        | `@AGENTS.md` plus Claude-only notes   |
 | 📁[.github/instructions/][instructionsFolder]    | Copilot (all surfaces), agents that follow a link   | Rules scoped to one file type         |
 | 📄[.github/copilot-instructions.md][copilotFile] | Copilot                                             | A pointer, for surfaces that need one |
+| 📁[.claude/agents/][agentsFolder]                | Claude Code, VS Code Copilot                        | Specialist reviewers, read-only       |
+| 📁[.claude/skills/][skillsFolder]                | Claude Code, all Copilot surfaces                   | Procedures, loaded only when used     |
 | 📁[docs/][docsFolder]                            | Humans; agents on demand                            | The reasoning behind the rules        |
 
 Nothing is duplicated:
@@ -55,6 +58,74 @@ and the rationale goes in `docs/`.
   [.github/instructions/][instructionsFolder].
 - The explanation, the how-to, the links, the tables → [docs/][docsFolder].
 
+## Agents and skills
+
+Instructions say *how to write code*. Agents and skills say *how to do a
+job* — and they are separate mechanisms with different reach.
+
+### Skills reach further
+
+A skill is a procedure in `.claude/skills/<name>/SKILL.md`, invoked as
+`/<name>` or chosen by the model from its `description`. That one path is read
+by Claude Code **and** by every Copilot surface, including code review, so a
+skill is the closest thing to a write-once artifact in this repo.
+
+Skills load lazily: the body costs nothing until it runs. That makes them the
+right home for anything that grew out of `AGENTS.md` into a sequence of steps.
+
+| Skill | Does |
+| :---- | :--- |
+| `/review` | Fans the three reviewers out in parallel, then merges and ranks |
+| `/tdd` | Red, green, refactor - one behaviour per cycle |
+| `/commit` | Groups changes by concern and writes a Conventional Commit |
+
+`/tdd` sets `disable-model-invocation: true`, so it only runs when you ask.
+The other two are worth letting the model reach for on its own.
+
+### Agents are for isolated, read-only work
+
+A subagent gets its own context window and returns a summary. That pays off
+when the work is **self-contained, verbose, and parallel** — which describes a
+review and very little else.
+
+| Agent | Lens |
+| :---- | :--- |
+| `security-reviewer` | Injection, secrets, authz, unsafe input, dependencies |
+| `perf-reviewer` | Complexity, allocations, N+1, blocking async |
+| `quality-reviewer` | This repo's conventions, naming, comments, tests |
+
+All three are read-only, by `tools: Read, Grep, Glob, Bash` plus
+`disallowedTools: Write, Edit`. That restriction is the point: a reviewer that
+can edit will quietly fix what it found instead of telling you, and you lose
+the review.
+
+### What deliberately isn't an agent
+
+Anthropic's own multi-agent write-up puts the cost at roughly 15x the tokens
+of a chat, and says the pattern suits "heavy parallelization" while
+"most coding tasks lack sufficient parallelizable components". Work where
+every participant needs the same context is called out as unsuitable.
+
+So:
+
+- **No developer agent.** The main conversation is the developer. A subagent
+  starts with no history and would re-derive what you just established.
+- **No architect agent.** Design needs back-and-forth, which is the one thing
+  a subagent is bad at. It is a skill if it is anything.
+- **No lead or orchestrator agent.** Claude Code's main loop already
+  orchestrates. A lead agent adds a context boundary and becomes the single
+  point of failure, for nothing. `/review` is that orchestration expressed as
+  a skill instead.
+
+The lever that actually controls delegation is each agent's `description`.
+Vague ones are why parallel agents duplicate each other's work.
+
+### Adding one
+
+Both are additive per layer, like everything else here: drop in a file, edit
+nothing inherited. A `test-runner` agent needs a language-specific command, so
+it belongs in `.template-dotnet`, not in this base repo.
+
 ## Adding a file type
 
 Add one file to [.github/instructions/][instructionsFolder],
@@ -86,6 +157,10 @@ Never copy rules into it.
 
 ## Known limits
 
+- **Custom agents do not reach Copilot code review.** Skills do, so a check
+  that has to run there belongs in a skill. A `.github/agents/*.agent.md`
+  mirror would add the Copilot cloud coding agent, and is worth generating
+  from these sources if that ever comes into use.
 - **Front matter globs are Copilot's mechanism.**
   Claude Code's equivalent is `.claude/rules/*.md` with a `paths:` list,
   which VS Code Copilot also honours.
@@ -101,6 +176,8 @@ Never copy rules into it.
 
 <!-- Source Code URIs (alphabetical by file hierarchy) -->
 
+[agentsFolder]: ../.claude/agents/
+[skillsFolder]: ../.claude/skills/
 [instructionsFolder]: ../.github/instructions/
 [copilotFile]: ../.github/copilot-instructions.md
 [docsFolder]: ./

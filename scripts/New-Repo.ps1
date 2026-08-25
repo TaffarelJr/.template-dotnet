@@ -41,6 +41,10 @@
     For -Kind Template the '.template-' prefix is optional:
     'dotnet' and '.template-dotnet' both produce '.template-dotnet'.
 
+.PARAMETER Visibility
+    'Public' or 'Private'. Default: Public.
+    Only applied when the repo is created; an existing one is left alone.
+
 .PARAMETER Description
     settings.yml description (single line).
 
@@ -49,6 +53,7 @@
 
 .PARAMETER Topics
     settings.yml topics (comma-separated).
+    Lowercase letters, digits and hyphens only.
 
 .PARAMETER CodecovToken
     CODECOV_TOKEN secret value. Empty = skip.
@@ -80,6 +85,7 @@
 param(
     [ValidateSet('Template', 'Code')][string]$Kind,
     [string]$Name,
+    [ValidateSet('Public', 'Private')][string]$Visibility,
     [string]$Description,
     [string]$Homepage,
     [string]$Topics,
@@ -111,11 +117,10 @@ $ctx = Get-TemplateContext -ScriptRoot $PSScriptRoot
 $owner = Get-RepoOwner
 
 $Kind = Resolve-Input -Name Kind -Bound $bound -Value $Kind `
-    -Prompt 'Kind - Template (a new layer) or Code (a leaf repo)' `
-    -Default 'Code'
-if ($Kind -notin 'Template', 'Code') {
-    throw "Kind must be 'Template' or 'Code', not '$Kind'."
-}
+    -Prompt 'Kind' `
+    -Choice 'Template', 'Code' `
+    -Default 'Code' `
+    -Require
 
 $namePrompt = if ($Kind -eq 'Template') {
     "Template type (kebab-case, e.g. 'dotnet' -> '.template-dotnet')"
@@ -124,7 +129,11 @@ else {
     "New repo name (kebab-case, e.g. 'my-service')"
 }
 $Name = Resolve-Input -Name Name -Bound $bound `
-    -Value $Name -Prompt $namePrompt
+    -Value $Name `
+    -Prompt $namePrompt `
+    -Pattern (Get-SlugPattern) `
+    -Requirement 'must be kebab-case: lowercase letters, digits, hyphens' `
+    -Require
 
 # Accept either 'dotnet' or '.template-dotnet' for a template layer.
 $slug = if ($Kind -eq 'Template') {
@@ -144,12 +153,30 @@ Write-Field 'Clone to'        $targetPath
 
 Use-GhAccount -ProbeOwnerRepo $ctx.SourceOwnerRepo
 
+$Visibility = Resolve-Input -Name Visibility -Bound $bound `
+    -Value $Visibility `
+    -Prompt 'Visibility' `
+    -Choice 'Public', 'Private' `
+    -Default 'Public' `
+    -Require
+
 $Description = Resolve-Input -Name Description -Bound $bound `
-    -Value $Description -Prompt 'Repo description (single line)'
+    -Value $Description `
+    -Prompt 'Repo description' `
+    -Pattern '^[^\r\n]{1,350}$' `
+    -Requirement 'must be a single line of 350 characters or fewer' `
+    -Require
+
 $Homepage = Resolve-Input -Name Homepage -Bound $bound `
-    -Value $Homepage -Prompt 'Homepage URL (optional - blank to omit)'
+    -Value $Homepage `
+    -Prompt 'Homepage URL (optional - blank to omit)' `
+    -Pattern '^https?://\S+$' `
+    -Requirement 'must be an http(s) URL, or blank'
+
 $Topics = Resolve-Input -Name Topics -Bound $bound `
-    -Value $Topics -Prompt 'Topics (comma-separated)'
+    -Value $Topics `
+    -Prompt 'Topics (comma-separated)'
+$Topics = Format-TopicList -Value $Topics -Label 'Topics'
 
 if (-not $bound.ContainsKey('CodecovToken')) {
     Write-Field 'Codecov token at' `
@@ -167,7 +194,7 @@ if (-not (Confirm-Proceed -OwnerRepo $ownerRepo)) { return }
 #───────────────────────────────────────────────────────────────────────────────
 
 Write-Step '1' 'Create the new repo'
-New-GitHubRepo -OwnerRepo $ownerRepo
+New-GitHubRepo -OwnerRepo $ownerRepo -Visibility $Visibility
 
 #───────────────────────────────────────────────────────────────────────────────
 # Step 2: settings (API)
@@ -273,7 +300,8 @@ Invoke-GatedCommit -RepoPath $targetPath `
         -ExtendsRepo $ctx.SourceRepo `
         -Description $Description `
         -Homepage $Homepage `
-        -Topics $Topics
+        -Topics $Topics `
+        -Visibility $Visibility
 }
 
 #───────────────────────────────────────────────────────────────────────────────
@@ -322,7 +350,7 @@ Start-VSCode -Target $wsFile
 
 Remove-LayerModule
 Reset-GhAccount
-Register-ManualSetting -OwnerRepo $ownerRepo
+Register-ManualSetting -OwnerRepo $ownerRepo -Visibility $Visibility
 Show-ManualChecklist   -OwnerRepo $ownerRepo
 Show-Summary
 
